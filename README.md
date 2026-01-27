@@ -284,4 +284,4 @@
 
 # Todo
 
-- finish scaling and ai stack/deployment section
+- backend done. work on frontend
