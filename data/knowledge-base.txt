@@ -1,0 +1,36 @@
+Real nightmare as a website developer
+
+I have been developing different types of websites for small businesses, individuals, agencies, startups and
+many more for more than one year now. In the course of time, I’ve learned more than just developing/coding
+websites - I learned about UI/UX design, multiple AI tools, different development frameworks and most
+importantly, dealing with different types of clients.
+Following is the list of challenges that I face, and how I try to solve them.
+1. The client doesn’t know what they want, but instantly knows when it’s wrong.
+2. They send reference websites and say “something like this” or “exactly like this”, without explaining what
+they like about any of them.
+3. Important assets arrive late, half-finished, low-resolution or as screenshots.
+4. Mobile design is ignored during planning, but blamed after launch.
+5. Days of silence followed by idea-bombing.
+6. Post-launch support is assumed to be unlimited, eternal and free.
+You’re hired as a website developer but you slowly have to become, UI/UX designer, logo designer, graphic
+designer, brand strategist, content writer and what not XD.
+Not everything is avoidable but here’s how I deal with things after one yoe;
+I have a set of around 15-20 questions about design, feel, and UX for the website. This ensures that the
+client pours out every single idea related to the website.
+I ask for a “brand identity” or try to understand their business.
+I try to make mockup designs before starting to code, because it saves time and energy. AI tools have
+made things simpler now.
+I help the client figure out the best practices, because most clients are unaware of real technical details,
+they only know words like “SEO” or “Landing page”
+I help my clients figure out what best suits their interests and needs.
+I centralize communication, and put everything in writing, so that changes could be tracked, people
+usually forget what they agreed to.
+I propose best plans for website maintenance after launch (E-com or sophisticated websites need regular
+security checks and maintenance)
+What I have learned the hard way:
+1. Bad clients exist, but unclear systems attract them faster.
+2. Strong processes don’t scare good clients away, they filter bad ones out.
+I still have a lot to learn, and I am learning everyday. Sometimes clients even say that my services are
+overpriced, but let me tell you one thing, you’re not paying for the website, you’re paying for the accountability,
+for the decisions, the experience, and the problems you don’t have to deal with later. I’m not selling code, I’m
+selling responsibility.

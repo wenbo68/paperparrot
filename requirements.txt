@@ -1,0 +1,12 @@
+llama-index
+python-dotenv
+langchain
+langchain-openai
+
+# for serper
+langchain-community
+google-search-results
+
+# langsmith
+langsmith
+openai
