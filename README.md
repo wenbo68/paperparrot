@@ -12,9 +12,9 @@
 
 - agent orchestration: langchain
 - rag (indexing/retrieval): llamaindex
-- storage: uploadthing (files/blob), neon postgres (file metadata, app data, checkpointer), neon pg vector (vector db)
 - embedding model: llamaindex default (openai: text-embedding-3-small)
 - inference model: langchain init_chat_model
+- storage: uploadthing (files/blob), neon postgres (file metadata, app data, checkpointer), neon pg vector (vector db)
 - frontend: nextjs (deployed on vercel)
 - backend: python/fastapi (deployed on railway or render)
 
