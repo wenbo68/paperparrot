@@ -1,7 +1,15 @@
+# llama-index
 llama-index
-python-dotenv
+psycopg2-binary
+
+# neon pgvector
+asyncpg
+llama-index-vector-stores-postgres
+
+# langchain
 langchain
 langchain-openai
+langgraph
 
 # for serper
 langchain-community
@@ -10,3 +18,14 @@ google-search-results
 # langsmith
 langsmith
 openai
+
+# checkpointer postgres
+langgraph-checkpoint-postgres
+psycopg-pool
+psycopg
+
+fastapi
+uvicorn
+pypdf
+requests
+python-dotenv
