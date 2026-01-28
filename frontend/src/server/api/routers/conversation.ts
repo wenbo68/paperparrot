@@ -8,10 +8,11 @@ export const conversationRouter = createTRPCRouter({
   create: protectedProcedure
     .input(z.object({ name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db.insert(conversations).values({
+      const [conversation] = await ctx.db.insert(conversations).values({
         name: input.name,
         userId: ctx.session.user.id,
-      });
+      }).returning();
+      return conversation;
     }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {

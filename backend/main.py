@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import os
@@ -29,7 +30,6 @@ search = GoogleSerperAPIWrapper()
 # This replaces the global "checkpointer = InMemorySaver()"
 # It ensures the database connection opens when the server starts 
 # and closes when the server stops.
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_url = os.getenv("DATABASE_URL")
@@ -115,6 +115,7 @@ def create_rag_agent(conversation_id: str, checkpointer):
 
 
 # --- Endpoint Param Models ---
+
 class IndexFileRequest(BaseModel):
     file_url: str
     file_id: str
@@ -169,6 +170,15 @@ def index_file(request: IndexFileRequest):
         print(f"Error indexing file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/delete-file")
+def delete_file(request: DeleteFileRequest):
+    try:
+        delete_file_by_id(request.file_id)
+        return {"status": "success", "message": f"Deleted file {request.file_id}"}
+    except Exception as e:
+        print(f"Error deleting file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     try:
@@ -203,14 +213,55 @@ async def chat(request: ChatRequest):
         # In production, check logs to see if it's a DB connection error
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/delete-file")
-def delete_file(request: DeleteFileRequest):
+@app.get("/api/chat/{conversation_id}/history")
+async def get_chat_history(conversation_id: str):
     try:
-        delete_file_by_id(request.file_id)
-        return {"status": "success", "message": f"Deleted file {request.file_id}"}
+        checkpointer = app.state.checkpointer
+        config = {"configurable": {"thread_id": conversation_id}}
+        
+        # Load the agent to access the state
+        agent = create_rag_agent(conversation_id, checkpointer)
+        state_snapshot = await agent.aget_state(config)
+        
+        messages = state_snapshot.values.get("messages", [])
+        history = []
+        
+        for msg in messages:
+            # 1. Handle User Messages (Simple)
+            if msg.type == "human":
+                history.append({
+                    "role": "user",
+                    "content": msg.content
+                })
+            
+            # 2. Handle AI Messages (Complex)
+            elif msg.type == "ai":
+                content_to_show = msg.content
+                
+                # Check if the content is hidden inside a tool call (Structured Output)
+                if not content_to_show and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        # We only want the tool call that contains our 'final_answer'
+                        # We skip other tools like 'search_internet' or 'search_documents'
+                        args = tool_call.get("args", {})
+                        if "final_answer" in args:
+                            content_to_show = args["final_answer"]
+                            break
+                
+                # Only append if we actually found text. 
+                # This automatically skips internal "thinking" steps (like search tool calls) 
+                # that have no content and no final_answer.
+                if content_to_show:
+                    history.append({
+                        "role": "assistant",
+                        "content": content_to_show
+                    })
+        
+        return {"history": history}
+
     except Exception as e:
-        print(f"Error deleting file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching history: {e}")
+        return {"history": []}
 
 if __name__ == "__main__":
     import uvicorn

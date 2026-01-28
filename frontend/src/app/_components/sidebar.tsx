@@ -69,7 +69,7 @@ export function Sidebar({ className }: { className?: string }) {
             {conversations?.map((conv) => (
               <Link
                 key={conv.id}
-                href={`/c/${conv.id}`}
+                href={`/chat/${conv.id}`}
                 className="group flex items-center justify-between rounded-md p-3 hover:bg-slate-800"
               >
                 <div className="flex items-center gap-3 overflow-hidden">
