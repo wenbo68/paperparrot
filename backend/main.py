@@ -216,41 +216,43 @@ async def chat(request: ChatRequest):
 @app.get("/api/chat/{conversation_id}/history")
 async def get_chat_history(conversation_id: str):
     try:
+        # 1. Get the checkpointer directly
         checkpointer = app.state.checkpointer
         config = {"configurable": {"thread_id": conversation_id}}
         
-        # Load the agent to access the state
-        agent = create_rag_agent(conversation_id, checkpointer)
-        state_snapshot = await agent.aget_state(config)
+        # 2. Fetch the raw checkpoint from the database
+        # We DO NOT need to create the agent or vector store here.
+        # This bypasses the asyncpg connection entirely.
+        checkpoint = await checkpointer.aget(config)
         
-        messages = state_snapshot.values.get("messages", [])
+        if not checkpoint:
+            return {"history": []}
+            
+        # 3. Extract messages from the checkpoint data
+        # 'channel_values' holds the state variables (like "messages")
+        messages = checkpoint.get("channel_values", {}).get("messages", [])
+        
         history = []
-        
         for msg in messages:
-            # 1. Handle User Messages (Simple)
+            # 1. Handle User Messages
             if msg.type == "human":
                 history.append({
                     "role": "user",
                     "content": msg.content
                 })
             
-            # 2. Handle AI Messages (Complex)
+            # 2. Handle AI Messages
             elif msg.type == "ai":
                 content_to_show = msg.content
                 
-                # Check if the content is hidden inside a tool call (Structured Output)
+                # Extract Structured Output (Hidden content)
                 if not content_to_show and hasattr(msg, 'tool_calls') and msg.tool_calls:
                     for tool_call in msg.tool_calls:
-                        # We only want the tool call that contains our 'final_answer'
-                        # We skip other tools like 'search_internet' or 'search_documents'
                         args = tool_call.get("args", {})
                         if "final_answer" in args:
                             content_to_show = args["final_answer"]
                             break
                 
-                # Only append if we actually found text. 
-                # This automatically skips internal "thinking" steps (like search tool calls) 
-                # that have no content and no final_answer.
                 if content_to_show:
                     history.append({
                         "role": "assistant",
