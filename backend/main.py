@@ -58,7 +58,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # In production, replace ["*"] with your actual Vercel domain
-    allow_origins=["http://localhost:3000"], 
+    allow_origins=[os.getenv("FRONTEND_URL")], 
     allow_credentials=True,
     allow_methods=["*"], # Allows GET, POST, DELETE, etc.
     allow_headers=["*"],
