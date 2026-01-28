@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from rag_utils import get_vector_store, delete_file_by_id
 
 load_dotenv()
+search = GoogleSerperAPIWrapper()
 
 # --- LIFESPAN MANAGER (The Database Keeper) ---
 # This replaces the global "checkpointer = InMemorySaver()"
@@ -53,7 +54,15 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI with the lifespan
 app = FastAPI(lifespan=lifespan)
-search = GoogleSerperAPIWrapper()
+# set up cors to allow frontend to access backend
+app.add_middleware(
+    CORSMiddleware,
+    # In production, replace ["*"] with your actual Vercel domain
+    allow_origins=["http://localhost:3000"], 
+    allow_credentials=True,
+    allow_methods=["*"], # Allows GET, POST, DELETE, etc.
+    allow_headers=["*"],
+)
 
 # --- Agent & Tool Setup Helpers ---
 @dataclass
