@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { index, pgTableCreator, primaryKey } from "drizzle-orm/pg-core";
 import { type AdapterAccount } from "next-auth/adapters";
 
@@ -106,3 +106,60 @@ export const verificationTokens = createTable(
   }),
   (t) => [primaryKey({ columns: [t.identifier, t.token] })]
 );
+
+export const conversations = createTable(
+  "conversation",
+  (d) => ({
+    id: d
+      .varchar({ length: 255 })
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    name: d.varchar({ length: 256 }).notNull(),
+    userId: d
+      .varchar({ length: 255 })
+      .notNull()
+      .references(() => users.id),
+    createdAt: d
+      .timestamp({ withTimezone: true })
+      .$defaultFn(() => sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: d.timestamp({ withTimezone: true }).$onUpdate(() => new Date()),
+  }),
+  (t) => [index("conversation_user_id_idx").on(t.userId)]
+);
+
+export const conversationsRelations = relations(conversations, ({ one, many }) => ({
+  user: one(users, { fields: [conversations.userId], references: [users.id] }),
+  files: many(files),
+}));
+
+export const files = createTable(
+  "file",
+  (d) => ({
+    id: d
+      .varchar({ length: 255 })
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    url: d.varchar({ length: 1024 }).notNull(),
+    key: d.varchar({ length: 256 }).notNull(),
+    name: d.varchar({ length: 256 }).notNull(),
+    conversationId: d
+      .varchar({ length: 255 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    createdAt: d
+      .timestamp({ withTimezone: true })
+      .$defaultFn(() => sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  }),
+  (t) => [index("file_conversation_id_idx").on(t.conversationId)]
+);
+
+export const filesRelations = relations(files, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [files.conversationId],
+    references: [conversations.id],
+  }),
+}));
