@@ -1,31 +1,28 @@
-# llama-index
+# Core LlamaIndex
 llama-index
-psycopg2-binary
-
-# neon pgvector
-asyncpg
 llama-index-vector-stores-postgres
+llama-index-embeddings-openai       #<-- NEW (Fixes the crash)
 
-# langchain
+# Database Drivers
+asyncpg
+psycopg2-binary
+psycopg
+psycopg-pool
+langgraph-checkpoint-postgres
+
+# LangChain & AI
 langchain
 langchain-openai
 langgraph
-
-# for serper
 langchain-community
-google-search-results
+langchain-google-serper             #<-- NEW (Fixes Search tool)
 
-# langsmith
+# Search & Utils
+# google-search-results             <-- REMOVE (Wrong package)
 langsmith
 openai
-
-# checkpointer postgres
-langgraph-checkpoint-postgres
-psycopg-pool
-psycopg
-
-fastapi
-uvicorn
 pypdf
 requests
 python-dotenv
+fastapi
+uvicorn
