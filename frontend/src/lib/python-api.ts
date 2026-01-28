@@ -22,7 +22,8 @@ export type ChatHistoryResponse = {
   }[];
 };
 
-const BASE_URL = env.NEXT_PUBLIC_API_URL;
+// Remove the slash before 'api' because the variable might already have one
+const BASE_URL = env.NEXT_PUBLIC_API_URL.replace(/\/$/, ""); // specific regex to remove trailing slash
 
 export const pythonApi = {
   chat: async (conversationId: string, message: string): Promise<ChatResponse> => {
