@@ -5,8 +5,7 @@ llama-index-embeddings-openai       #<-- NEW (Fixes the crash)
 
 # Database Drivers
 asyncpg
-psycopg2-binary
-psycopg
+psycopg[binary]
 psycopg-pool
 langgraph-checkpoint-postgres
 
@@ -15,7 +14,6 @@ langchain
 langchain-openai
 langgraph
 langchain-community
-langchain-google-serper             #<-- NEW (Fixes Search tool)
 
 # Search & Utils
 # google-search-results             <-- REMOVE (Wrong package)
