@@ -188,9 +188,12 @@
 ##### self-hosted models (when you don't wanna use cloud apis)
 
 1. inference: ml paas (eg aws sagemaker)
+
 - regular paas (eg railway) don't have enough GPUs
 - in sagemaker you can select the aws lmi container, which uses the inference engine vllm under the hood
+
 3. embedding
+
 - paas
   - just add sentence-transformers to requirements.txt; when your backend container starts, it downloads the embedding model weights and holds them in RAM
   - you only deploy the embedding model as a separate docker container if you are using microservices and all of them need the same embedding model
@@ -302,5 +305,6 @@
 
 # Todo
 
-- backend done. work on frontend
-- backend has test_chat_001 but frontend db doesn't
+- deployed.
+- optimize frontend.
+- optimize metadata/seo.
