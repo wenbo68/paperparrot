@@ -305,6 +305,5 @@
 
 # Todo
 
-- deployed.
-- optimize frontend.
-- optimize metadata/seo.
+- add upload button to chat input
+- merge left/right sidebar
