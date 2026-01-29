@@ -42,7 +42,7 @@
 
 4. Caas: containers as a service (industry standard for AI)
 
-- provider runs your kubernetes cluster (keeps it alive)
+- provider runs your kubernetes cluster of docker containers (keeps the cluster alive)
 - you give provider detailed yaml files that dictate how many cpu/gpu each service can use and which other services it can talk to
 - so caas is unopinionated unlike paas: you (not the provider) determine how it runs
 - example: aws eks, google kubernetes engine (gke)
