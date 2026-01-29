@@ -183,7 +183,25 @@
 
 1. app/user data: paas (eg neon)
 2. vectors: paas (eg neon pgvector, pinecone), caas/iaas/onpremise (eg chromadb)
-3. checkpointers: paas (eg neon)
+3. checkpoints: paas (eg neon)
+
+##### self-hosted models (when you don't wanna use cloud apis)
+
+1. inference: ml paas (eg aws sagemaker)
+- regular paas (eg railway) don't have enough GPUs
+- in sagemaker you can select the aws lmi container, which uses the inference engine vllm under the hood
+3. embedding
+- paas
+  - just add sentence-transformers to requirements.txt; when your backend container starts, it downloads the embedding model weights and holds them in RAM
+  - you only deploy the embedding model as a separate docker container if you are using microservices and all of them need the same embedding model
+    - you don't want all microservices to download the same weights individually
+    - letting the embedding model have its own container will add latency (will be http/api calls btw microservice container and embedding model container)
+  - reduces cost (sagemaker is expensive) and latency (no http/api calls btw backend server and sagemaker center)
+- ml paas: only for the following reasons
+  - massive embedding model that will be too slow on CPU
+  - microservices that needs the same embedding models
+    - if you don't want to deploy the embedding model as a separate container in your backend server, you can just deploy it on sagemaker
+  - devops says they only monitor sagemaker endpoints and don't want to monitor models in docker containers
 
 ##### cache
 
