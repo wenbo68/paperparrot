@@ -25,13 +25,19 @@ export const ourFileRouter = {
       // console.log("file url", file.ufsUrl);
 
       // !!! Whatever is returned here is sent to the clientside `onClientUploadComplete` callback
-      return { uploadedBy: metadata.userId, url: file.ufsUrl, name: file.name, key: file.key };
+      return {
+        uploadedBy: metadata.userId,
+        url: file.ufsUrl,
+        name: file.name,
+        key: file.key,
+      };
     }),
-    
-  fileUploader: f({ 
-    pdf: { maxFileSize: "16MB" },
-    text: { maxFileSize: "16MB" },
-    blob: { maxFileSize: "16MB" } // for other types if needed
+
+  mixedUploader: f({
+    // image: { maxFileSize: "4MB" },
+    // pdf: { maxFileSize: "4MB" },
+    // text: { maxFileSize: "4MB" },
+    blob: { maxFileSize: "4MB", maxFileCount: 4 },
   })
     .middleware(async ({ req }) => {
       const session = await auth();
@@ -39,8 +45,11 @@ export const ourFileRouter = {
       return { userId: session.user.id };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      // console.log("File upload complete:", file.ufsUrl);
-      return { uploadedBy: metadata.userId, url: file.ufsUrl, name: file.name, key: file.key };
+      return {
+        url: file.ufsUrl,
+        name: file.name,
+        key: file.key,
+      };
     }),
 } satisfies FileRouter;
 

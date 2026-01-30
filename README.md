@@ -305,5 +305,6 @@
 
 # Todo
 
+- 4 chats max; 4 files max; 8mb max
 - add upload button to chat input
 - merge left/right sidebar

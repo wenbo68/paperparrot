@@ -10,6 +10,7 @@ import { Send, FileText, Trash2, Paperclip, Loader2 } from "lucide-react";
 import { marked } from "marked";
 import { v4 as uuidv4 } from "uuid";
 import TextareaAutosize from "react-textarea-autosize";
+import MixedUploader from "./MixedUploader";
 
 type Message = {
   role: "user" | "assistant";
@@ -177,22 +178,24 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     },
   });
 
-  const handleUploadComplete = async (res: any[]) => {
-    if (res && res.length > 0) {
+  const handleUploadComplete = async (
+    uploadedFiles: { key: string; url: string; name: string }[],
+  ) => {
+    if (uploadedFiles && uploadedFiles.length > 0) {
       try {
-        const file = res[0]!;
-        let targetId = conversationId;
+        const file = uploadedFiles[0]!;
+        let targetConversationId = conversationId;
 
         // Handle Upload on "New Chat" Screen
-        if (!targetId) {
-          targetId = uuidv4();
+        if (!targetConversationId) {
+          targetConversationId = uuidv4();
           // We MUST create the conversation row in DB before linking file
           await createConversationMutation.mutateAsync({
-            id: targetId,
-            name: "New Chat (File)",
+            id: targetConversationId,
+            name: new Date().toISOString().slice(0, 19),
           });
           // Redirect user to this new chat context
-          router.push(`/chat/${targetId}`);
+          router.push(`/chat/${targetConversationId}`);
         }
 
         // 1. Create File Record in DB
@@ -200,7 +203,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
           name: file.name,
           url: file.url,
           key: file.key,
-          conversationId: targetId,
+          conversationId: targetConversationId,
         });
 
         // 2. Index in Python Backend
@@ -208,13 +211,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
           await indexFileMutation.mutateAsync({
             fileId: createdFile.id,
             url: file.url,
-            convId: targetId,
+            convId: targetConversationId,
           });
         }
 
         // Refresh file list
-        if (targetId) {
-          utils.file.getByConversation.invalidate({ conversationId: targetId });
+        if (targetConversationId) {
+          utils.file.getByConversation.invalidate({
+            conversationId: targetConversationId,
+          });
         }
       } catch (e) {
         console.error("File processing error", e);
@@ -336,8 +341,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         </h2>
 
         <div className="mb-6">
-          <UploadButton
+          {/* <UploadButton
             endpoint="fileUploader"
+            input={{
+              accept: "image/*, application/pdf, text/plain, application/json",
+            }}
             onClientUploadComplete={handleUploadComplete}
             onUploadError={(error: Error) => {
               alert(`ERROR! ${error.message}`);
@@ -347,32 +355,47 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                 "bg-slate-700 text-white hover:bg-slate-600 w-full text-sm py-2",
               allowedContent: "text-slate-400 text-xs",
             }}
+          /> */}
+          <MixedUploader
+            onUploadSuccess={handleUploadComplete}
+            availability={4 - (files?.length ?? 0)}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          {files?.map((file) => (
-            <div
-              key={file.id}
-              className="group relative flex items-center gap-2 rounded-md bg-slate-800 p-2 text-sm text-slate-300"
-            >
-              <FileText size={16} className="shrink-0" />
-              <a
-                href={file.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="truncate hover:underline"
+          {files?.map((file) => {
+            const fileName = file.name;
+            const lastDotIndex = fileName.lastIndexOf(".");
+            const name =
+              lastDotIndex !== -1
+                ? fileName.substring(0, lastDotIndex)
+                : fileName;
+            const extension =
+              lastDotIndex !== -1 ? fileName.substring(lastDotIndex) : null;
+
+            return (
+              <div
+                key={file.id}
+                className="group relative flex items-center gap-2 rounded-md bg-slate-800 p-2 text-sm text-slate-300"
               >
-                {file.name}
-              </a>
-              <button
-                onClick={() => handleFileDelete(file.id)}
-                className="absolute right-2 hidden text-red-400 group-hover:block hover:text-red-300"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
+                <a
+                  href={file.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex max-w-full hover:underline"
+                >
+                  <span className="truncate">{name}</span>
+                  {extension && <span className="flex-none">{extension}</span>}
+                </a>
+                <button
+                  onClick={() => handleFileDelete(file.id)}
+                  className="absolute right-2 hidden text-red-400 group-hover:block hover:text-red-300"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
           {(!files || files.length === 0) && (
             <p className="text-center text-xs text-slate-500">
               No files uploaded.
