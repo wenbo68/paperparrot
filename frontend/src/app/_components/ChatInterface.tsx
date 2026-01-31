@@ -22,6 +22,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const queryClient = useQueryClient();
 
   const [userInput, setUserInput] = useState("");
+  // New state for upload loading
+  const [isUploading, setIsUploading] = useState(false);
 
   // 1. Capture initial query strictly once
   const initialQueryRef = useRef(searchParams.get("initialQuery"));
@@ -42,8 +44,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     enabled: !!conversationId,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
-    // FIX 1: Seed the query with initial data so it's never empty.
-    // This prevents the "flicker" where the empty fetch overwrites the optimistic update.
     initialData:
       initialQueryRef.current && conversationId
         ? { history: [{ role: "user", content: initialQueryRef.current }] }
@@ -52,9 +52,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
   const messages = historyData?.history || [];
 
-  // FIX 2: Derive "Thinking" state from data, not mutation state.
-  // If the last message is from the User, the AI is thinking.
-  // This is impossible to get "stuck" because as soon as AI replies, it flips to false.
   const lastMessage = messages[messages.length - 1];
   const isAgentThinking = lastMessage?.role === "user";
 
@@ -71,8 +68,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
       if (!conversationId)
         throw new Error("Conversation ID missing during chat mutation");
 
-      // FIX 3: Always try to create conversation if it's the first message
-      // (We check <= 1 because we might have just added the user message optimistically)
       if (messages.length <= 1) {
         try {
           await createConversationMutation.mutateAsync({
@@ -98,7 +93,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
       queryClient.setQueryData(["chatHistory", conversationId], (old: any) => {
         const oldHistory = old?.history || [];
-        // Prevent duplicate optimistic updates if initialData already added it
         const isDuplicate =
           oldHistory.length > 0 &&
           oldHistory[oldHistory.length - 1].content === newMsg;
@@ -133,21 +127,72 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     },
   });
 
+  // -- File Handling Mutations (Optimistic Delete) --
+
+  const deleteBackendFileMutation = useMutation({
+    mutationFn: async (fileId: string) => {
+      if (conversationId) return pythonApi.deleteFile(fileId, conversationId);
+    },
+  });
+
+  const deleteFileMutation = api.file.delete.useMutation({
+    // 1. On Mutate: Update UI immediately
+    onMutate: async ({ id }) => {
+      // Cancel refetches so they don't overwrite our optimistic update
+      await utils.file.getByConversation.cancel({
+        conversationId: conversationId!,
+      });
+
+      // Snapshot the previous value
+      const previousFiles = utils.file.getByConversation.getData({
+        conversationId: conversationId!,
+      });
+
+      // Optimistically remove the file from the list
+      utils.file.getByConversation.setData(
+        { conversationId: conversationId! },
+        (old) => old?.filter((f) => f.id !== id) ?? [],
+      );
+
+      return { previousFiles };
+    },
+    // 2. On Error: Rollback
+    onError: (err, newTodo, context) => {
+      utils.file.getByConversation.setData(
+        { conversationId: conversationId! },
+        context?.previousFiles,
+      );
+      alert("Failed to delete file.");
+    },
+    // 3. On Success: Trigger backend delete & cleanup
+    onSuccess: (data, variables) => {
+      // Trigger Python deletion asynchronously (don't block UI)
+      deleteBackendFileMutation.mutate(variables.id);
+    },
+    // 4. Always refetch to ensure true sync
+    onSettled: () => {
+      utils.file.getByConversation.invalidate({
+        conversationId: conversationId!,
+      });
+    },
+  });
+
+  const handleFileDelete = (fileId: string) => {
+    // We don't await this because optimistic updates handle the UI
+    deleteFileMutation.mutate({ id: fileId });
+  };
+
   // -- Handlers --
 
   useEffect(() => {
-    const initialQuery = initialQueryRef.current; // Use the ref we captured
+    const initialQuery = initialQueryRef.current;
     if (initialQuery && conversationId && !hasAutoSent.current) {
       hasAutoSent.current = true;
-
-      // 1. Trigger the mutation
       sendAndReceiveChatMutation.mutate(initialQuery);
-
-      // 2. Clean the URL silently
       const newUrl = `/chat/${conversationId}`;
       window.history.replaceState(null, "", newUrl);
     }
-  }, [conversationId, sendAndReceiveChatMutation]); // Removed searchParams to prevent re-runs
+  }, [conversationId, sendAndReceiveChatMutation]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,7 +210,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     router.push(`/chat/${newId}?initialQuery=${encodedQuery}`);
   };
 
-  // ... (File handling code remains the same) ...
   const { data: files } = api.file.getByConversation.useQuery(
     { conversationId: conversationId! },
     { enabled: !!conversationId },
@@ -174,83 +218,71 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const createFileMutation = api.file.create.useMutation();
   const indexFileMutation = useMutation({
     mutationFn: async ({
+      fileName,
       fileId,
-      url,
+      fileUrl,
       convId,
     }: {
+      fileName: string;
       fileId: string;
-      url: string;
+      fileUrl: string;
       convId: string;
     }) => {
-      return pythonApi.indexFile(fileId, url, convId);
+      return pythonApi.indexFile(fileName, fileId, fileUrl, convId);
     },
   });
 
   const handleUploadComplete = async (
     uploadedFiles: { key: string; url: string; name: string }[],
   ) => {
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      try {
-        const file = uploadedFiles[0]!;
-        let targetConversationId = conversationId;
+    if (!uploadedFiles || uploadedFiles.length === 0) return;
 
-        if (!targetConversationId) {
-          targetConversationId = uuidv4();
-          await createConversationMutation.mutateAsync({
-            id: targetConversationId,
-            name: new Date().toISOString().slice(0, 19),
-          });
-          router.push(`/chat/${targetConversationId}`);
-        }
+    // Start Loading State
+    setIsUploading(true);
 
-        const createdFile = await createFileMutation.mutateAsync({
-          name: file.name,
-          url: file.url,
-          key: file.key,
-          conversationId: targetConversationId!,
-        });
-
-        if (createdFile) {
-          await indexFileMutation.mutateAsync({
-            fileId: createdFile.id,
-            url: file.url,
-            convId: targetConversationId!,
-          });
-        }
-
-        if (targetConversationId) {
-          utils.file.getByConversation.invalidate({
-            conversationId: targetConversationId,
-          });
-        }
-      } catch (e) {
-        console.error("File processing error", e);
-        alert("Error processing uploaded file.");
-      }
-    }
-    alert("Upload Completed");
-  };
-
-  const deleteFileMutation = api.file.delete.useMutation({
-    onSuccess: () => {
-      if (conversationId)
-        utils.file.getByConversation.invalidate({ conversationId });
-    },
-  });
-
-  const deleteBackendFileMutation = useMutation({
-    mutationFn: async (fileId: string) => {
-      if (conversationId) return pythonApi.deleteFile(fileId, conversationId);
-    },
-  });
-
-  const handleFileDelete = async (fileId: string) => {
-    if (!confirm("Delete this file?")) return;
-    await deleteFileMutation.mutateAsync({ id: fileId });
     try {
-      await deleteBackendFileMutation.mutateAsync(fileId);
+      let targetConversationId = conversationId;
+
+      if (!targetConversationId) {
+        targetConversationId = uuidv4();
+        await createConversationMutation.mutateAsync({
+          id: targetConversationId,
+          name: new Date().toISOString().slice(0, 19).replace("T", " "),
+        });
+        window.history.replaceState(null, "", `/chat/${targetConversationId}`);
+      }
+
+      await Promise.all(
+        uploadedFiles.map(async (file) => {
+          const createdFile = await createFileMutation.mutateAsync({
+            name: file.name,
+            url: file.url,
+            key: file.key,
+            conversationId: targetConversationId!,
+          });
+
+          if (createdFile) {
+            await indexFileMutation.mutateAsync({
+              fileName: file.name,
+              fileId: createdFile.id,
+              fileUrl: file.url,
+              convId: targetConversationId!,
+            });
+          }
+        }),
+      );
+
+      void utils.file.getByConversation.invalidate({
+        conversationId: targetConversationId,
+      });
+
+      alert("Files processed successfully!");
     } catch (e) {
-      console.error("Failed to delete from backend", e);
+      console.error("File processing error", e);
+      alert("Error processing some files.");
+    } finally {
+      // End Loading State regardless of success/fail
+      setIsUploading(false);
     }
   };
 
@@ -297,7 +329,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                 ),
               )}
 
-              {/* FIX 2: Use derived state "isThinking" instead of mutation.isPending */}
               {isAgentThinking && (
                 <p className="animate-pulse text-gray-400">Thinking...</p>
               )}
@@ -334,16 +365,26 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
           <Paperclip size={20} />
           Files
         </h2>
-        {/* File List logic (unchanged) */}
+
+        {/* Upload Loading State */}
         <div className="mb-6">
-          <MixedUploader
-            onUploadSuccess={handleUploadComplete}
-            availability={4 - (files?.length ?? 0)}
-          />
+          {isUploading ? (
+            <div className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-800 py-8">
+              <Loader2 className="animate-spin text-blue-500" size={24} />
+              <span className="mt-2 text-sm text-slate-400">
+                Processing files...
+              </span>
+            </div>
+          ) : (
+            <MixedUploader
+              onUploadSuccess={handleUploadComplete}
+              availability={4 - (files?.length ?? 0)}
+            />
+          )}
         </div>
+
         <div className="flex flex-col gap-2">
           {files?.map((file) => {
-            // ... existing file rendering logic ...
             const fileName = file.name;
             const lastDotIndex = fileName.lastIndexOf(".");
             const name =

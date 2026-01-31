@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 import os
 import tempfile
 import requests
+import fitz  # PyMuPDF
 from dotenv import load_dotenv
 
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, Document
 from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
+from llama_index.core.node_parser import SentenceSplitter # Import this
 
 from langchain.tools import tool
 from langchain.chat_models import init_chat_model
@@ -120,8 +122,9 @@ def create_rag_agent(conversation_id: str, checkpointer):
 # --- Endpoint Param Models ---
 
 class IndexFileRequest(BaseModel):
-    file_url: str
+    file_name: str
     file_id: str
+    file_url: str
     conversation_id: str
 
 class ChatRequest(BaseModel):
@@ -132,45 +135,101 @@ class DeleteFileRequest(BaseModel):
     file_id: str
     conversation_id: str
 
-
 # --- Endpoints ---
 
 @app.get("/")
 def read_root():
     return {"message": "PaperParrot Backend is running"}
 
+def load_file_from_memory(file_bytes: bytes, file_name: str) -> str:
+    """
+    Intelligently extracts text based on file extension from bytes.
+    """
+    ext = os.path.splitext(file_name)[1].lower()
+    
+    # 1. BINARY FORMATS (Need special parsers)
+    if ext == ".pdf":
+        text_content = ""
+        # Open PDF from memory stream
+        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+            for page in doc:
+                text_content += page.get_text()
+        return text_content
+        
+    # Add other binaries here if needed (e.g., .docx using python-docx)
+
+    # 2. TEXT FORMATS (Code, JSON, Markdown, etc.)
+    # All these can simply be decoded from UTF-8
+    text_extensions = {".txt", ".json", ".ts", ".js", ".py", ".md", ".csv", ".html", ".css"}
+    
+    if ext in text_extensions or not ext:
+        try:
+            return file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            # Fallback if utf-8 fails (sometimes happens with weird windows encoding)
+            return file_bytes.decode("latin-1")
+
+    # 3. UNSUPPORTED
+    raise ValueError(f"Unsupported file type: {ext}")
+
+
 @app.post("/api/index-file")
-def index_file(request: IndexFileRequest):
+async def index_file(request: IndexFileRequest):
     try:
-        # Same logic as before...
         print(f"Downloading {request.file_url}...")
+        # download file from uploadthing
         response = requests.get(request.file_url)
         response.raise_for_status()
         
-        ext = os.path.splitext(request.file_url)[1] or ".txt"
+        # extract text from file (in memory)
+        # SimpleDirectoryReader can only read from disk (not from memory)
+        # so it's only really used for hobby/tutorial projects
+        extracted_text = load_file_from_memory(response.content, request.file_name)
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-            tmp.write(response.content)
-            tmp_path = tmp.name
+        # We perform the NUL byte cleaning here once (for postgres/pgvector)
+        clean_text = extracted_text.replace("\x00", "")
+        
+        # # create llamaindex document
+        # new_doc = Document(
+        #     text=clean_text,
+            # metadata={
+            #     "conversation_id": request.conversation_id,
+            #     "file_id": request.file_id,
+            #     "file_name": request.file_name,
+            #     "file_url": request.file_url,
+            # })
+        
+        # # Index
+        # vector_store = get_vector_store()
+        # storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        # VectorStoreIndex.from_documents([new_doc], storage_context=storage_context)
+        
+        # 1. Create Base Document
+        base_doc = Document(text=clean_text, metadata={
+                "conversation_id": request.conversation_id,
+                "file_id": request.file_id,
+                "file_name": request.file_name,
+                "file_url": request.file_url,
+            })
 
-        try:
-            documents = SimpleDirectoryReader(input_files=[tmp_path]).load_data()
-            for doc in documents:
-                doc.metadata["conversation_id"] = request.conversation_id
-                doc.metadata["file_id"] = request.file_id
-            
-            vector_store = get_vector_store()
-            storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            VectorStoreIndex.from_documents(documents, storage_context=storage_context)
-            
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-                
-        return {"status": "success", "message": f"Indexed file {request.file_id}"}
+        # 2. Manually Split into Nodes (Chunks) so that we can add custom message to each chunk
+        parser = SentenceSplitter()
+        nodes = parser.get_nodes_from_documents([base_doc])
+
+        # 3. Modify Every Node
+        for node in nodes:
+            # Prepend your custom sentence to the actual text content of every chunk
+            node.text = f"The user uploaded a file called '{request.file_name}'. The following is a chunk of the file '{request.file_name}':\n\n{node.text}"
+
+        # 4. Index the Nodes directly
+        vector_store = get_vector_store()
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        VectorStoreIndex(nodes, storage_context=storage_context) # use VectorStoreIndex(...) not .from_documents
+
+        return {"status": "success", "message": f"Indexed {request.file_name}"}
 
     except Exception as e:
-        print(f"Error indexing file: {e}")
+        print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/delete-file")
