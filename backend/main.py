@@ -36,19 +36,22 @@ async def lifespan(app: FastAPI):
     if not db_url:
         raise ValueError("DATABASE_URL not set")
     
-    # --- FIX IS HERE: Add kwargs={"autocommit": True} ---
-    # This ensures that when setup() runs "CREATE INDEX CONCURRENTLY", 
-    # it is not wrapped in a transaction block.
     async with AsyncConnectionPool(
-        conninfo=db_url, 
-        max_size=20, 
-        kwargs={"autocommit": True} 
+        conninfo=db_url,
+        max_size=10,
+        
+        # Keep these stability settings
+        check=AsyncConnectionPool.check_connection,
+        max_lifetime=300,
+        
+        # --- FIX: Change 'client_kwargs' to 'kwargs' ---
+        kwargs={
+            "autocommit": True, 
+            "prepare_threshold": None,
+        }
     ) as pool:
         checkpointer = AsyncPostgresSaver(pool)
-        
-        # This will now succeed
         await checkpointer.setup()
-        
         app.state.checkpointer = checkpointer
         yield
 
