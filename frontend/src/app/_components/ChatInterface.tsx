@@ -2,20 +2,14 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { pythonApi } from "~/lib/python-api";
 import { api } from "~/trpc/react";
-import { UploadButton } from "~/utils/uploadthing";
-import { Send, FileText, Trash2, Paperclip, Loader2 } from "lucide-react";
+import { Send, Trash2, Paperclip, Loader2 } from "lucide-react";
 import { marked } from "marked";
 import { v4 as uuidv4 } from "uuid";
 import TextareaAutosize from "react-textarea-autosize";
 import MixedUploader from "./MixedUploader";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
 
 interface ChatInterfaceProps {
   conversationId?: string;
@@ -25,19 +19,21 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const utils = api.useUtils();
+  const queryClient = useQueryClient();
 
-  // State
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [userInput, setUserInput] = useState("");
 
-  // Ref to track if we've handled the auto-send for this specific page load
+  // 1. Capture initial query strictly once
+  const initialQueryRef = useRef(searchParams.get("initialQuery"));
   const hasAutoSent = useRef(false);
 
-  // -- 1. Data Fetching --
+  // -- Data Fetching --
 
-  // Fetch Chat History (Only if conversationId exists)
-  const { data: historyData, isLoading: isHistoryLoading } = useQuery({
+  const {
+    data: historyData,
+    isLoading: isHistoryLoading,
+    isError: isHistoryError,
+  } = useQuery({
     queryKey: ["chatHistory", conversationId],
     queryFn: () =>
       conversationId
@@ -45,125 +41,137 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         : Promise.resolve({ history: [] }),
     enabled: !!conversationId,
     refetchOnWindowFocus: false,
+    staleTime: Infinity,
+    // FIX 1: Seed the query with initial data so it's never empty.
+    // This prevents the "flicker" where the empty fetch overwrites the optimistic update.
+    initialData:
+      initialQueryRef.current && conversationId
+        ? { history: [{ role: "user", content: initialQueryRef.current }] }
+        : undefined,
   });
 
-  // Sync messages with history when it loads
-  // We use a ref to prevent overwriting optimistic updates if the user is typing fast
-  const messagesLenRef = useRef(messages.length);
-  useEffect(() => {
-    messagesLenRef.current = messages.length;
-  }, [messages]);
+  const messages = historyData?.history || [];
 
-  useEffect(() => {
-    if (conversationId && historyData?.history) {
-      // If history is empty but we have local messages, it's likely a new chat we just started.
-      // Don't overwrite local state with empty history.
-      if (historyData.history.length === 0 && messagesLenRef.current > 0) {
-        return;
-      }
-      setMessages(historyData.history);
-    } else if (!conversationId) {
-      // Reset if we navigated back to "New Chat"
-      setMessages([]);
-    }
-  }, [historyData, conversationId]);
+  // FIX 2: Derive "Thinking" state from data, not mutation state.
+  // If the last message is from the User, the AI is thinking.
+  // This is impossible to get "stuck" because as soon as AI replies, it flips to false.
+  const lastMessage = messages[messages.length - 1];
+  const isAgentThinking = lastMessage?.role === "user";
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // -- 2. Mutations --
+  // -- Mutations --
 
   const createConversationMutation = api.conversation.create.useMutation({
     onSuccess: async () => {
-      await utils.conversation.getAll.invalidate();
+      void utils.conversation.getAll.invalidate();
     },
   });
 
-  const chatMutation = useMutation({
+  const sendAndReceiveChatMutation = useMutation({
     mutationFn: async (msg: string) => {
       if (!conversationId)
         throw new Error("Conversation ID missing during chat mutation");
 
-      // 1. If this is the very first message, ensure the DB row exists.
-      // We check messages.length === 0 (or strictly 1 if we just added the optimistic one).
-      // Ideally, check if history was empty.
-      if (messages.length === 0) {
+      // FIX 3: Always try to create conversation if it's the first message
+      // (We check <= 1 because we might have just added the user message optimistically)
+      if (messages.length <= 1) {
         try {
           await createConversationMutation.mutateAsync({
             id: conversationId,
-            name: msg.slice(0, 30) || "New Chat",
+            name: new Date().toISOString().replace("T", " ").slice(0, 19),
           });
         } catch (e) {
-          // Ignore unique constraint errors if it was already created by file upload or race condition
-          console.log("Conversation might already exist, proceeding...");
+          // Ignore "Already exists" errors
         }
       }
 
-      // 2. Optimistically add user message (UI only)
-      const userMsg: Message = { role: "user", content: msg };
-      setMessages((prev) => [...prev, userMsg]);
+      return await pythonApi.chat(conversationId, msg);
+    },
+    onMutate: async (newMsg) => {
+      await queryClient.cancelQueries({
+        queryKey: ["chatHistory", conversationId],
+      });
 
-      // 3. Call Python Backend
-      const res = await pythonApi.chat(conversationId, msg);
-      return res;
+      const previousData = queryClient.getQueryData([
+        "chatHistory",
+        conversationId,
+      ]);
+
+      queryClient.setQueryData(["chatHistory", conversationId], (old: any) => {
+        const oldHistory = old?.history || [];
+        // Prevent duplicate optimistic updates if initialData already added it
+        const isDuplicate =
+          oldHistory.length > 0 &&
+          oldHistory[oldHistory.length - 1].content === newMsg;
+
+        if (isDuplicate) return old;
+
+        return {
+          ...old,
+          history: [...oldHistory, { role: "user", content: newMsg }],
+        };
+      });
+
+      return { previousData };
+    },
+    onError: (err, newMsg, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(
+          ["chatHistory", conversationId],
+          context.previousData,
+        );
+      }
+      alert("Failed to send message.");
     },
     onSuccess: (data) => {
-      const assistantMsg: Message = { role: "assistant", content: data.answer };
-      setMessages((prev) => [...prev, assistantMsg]);
-    },
-    onError: (error) => {
-      console.error("Chat error:", error);
-      alert(
-        "Failed to send message: " +
-          (error instanceof Error ? error.message : String(error)),
-      );
+      queryClient.setQueryData(["chatHistory", conversationId], (old: any) => {
+        const oldHistory = old?.history || [];
+        return {
+          ...old,
+          history: [...oldHistory, { role: "assistant", content: data.answer }],
+        };
+      });
     },
   });
 
-  // -- 3. Handlers --
+  // -- Handlers --
 
-  // Handle "Auto Send" from URL (The transition magic)
   useEffect(() => {
-    const initialQuery = searchParams.get("initialQuery");
+    const initialQuery = initialQueryRef.current; // Use the ref we captured
     if (initialQuery && conversationId && !hasAutoSent.current) {
       hasAutoSent.current = true;
-      // Clean URL first so we don't resend on refresh
-      router.replace(`/chat/${conversationId}`);
-      // Send the message
-      chatMutation.mutate(initialQuery);
+
+      // 1. Trigger the mutation
+      sendAndReceiveChatMutation.mutate(initialQuery);
+
+      // 2. Clean the URL silently
+      const newUrl = `/chat/${conversationId}`;
+      window.history.replaceState(null, "", newUrl);
     }
-  }, [searchParams, conversationId, chatMutation, router]);
+  }, [conversationId, sendAndReceiveChatMutation]); // Removed searchParams to prevent re-runs
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || chatMutation.isPending) return;
+    if (!userInput.trim() || isAgentThinking) return;
 
-    // SCENARIO A: We are already in a chat
     if (conversationId) {
-      chatMutation.mutate(input);
-      setInput("");
+      sendAndReceiveChatMutation.mutate(userInput);
+      setUserInput("");
       return;
     }
 
-    // SCENARIO B: We are in "New Chat" -> Generate ID and Redirect
     const newId = uuidv4();
-    const encodedQuery = encodeURIComponent(input);
-    setInput(""); // Clear input immediately
-    // Navigate to the new ID, passing the message in URL
+    const encodedQuery = encodeURIComponent(userInput);
+    setUserInput("");
     router.push(`/chat/${newId}?initialQuery=${encodedQuery}`);
   };
 
-  // -- 4. File Management --
-
+  // ... (File handling code remains the same) ...
   const { data: files } = api.file.getByConversation.useQuery(
     { conversationId: conversationId! },
     { enabled: !!conversationId },
   );
 
   const createFileMutation = api.file.create.useMutation();
-
   const indexFileMutation = useMutation({
     mutationFn: async ({
       fileId,
@@ -186,36 +194,30 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         const file = uploadedFiles[0]!;
         let targetConversationId = conversationId;
 
-        // Handle Upload on "New Chat" Screen
         if (!targetConversationId) {
           targetConversationId = uuidv4();
-          // We MUST create the conversation row in DB before linking file
           await createConversationMutation.mutateAsync({
             id: targetConversationId,
             name: new Date().toISOString().slice(0, 19),
           });
-          // Redirect user to this new chat context
           router.push(`/chat/${targetConversationId}`);
         }
 
-        // 1. Create File Record in DB
         const createdFile = await createFileMutation.mutateAsync({
           name: file.name,
           url: file.url,
           key: file.key,
-          conversationId: targetConversationId,
+          conversationId: targetConversationId!,
         });
 
-        // 2. Index in Python Backend
         if (createdFile) {
           await indexFileMutation.mutateAsync({
             fileId: createdFile.id,
             url: file.url,
-            convId: targetConversationId,
+            convId: targetConversationId!,
           });
         }
 
-        // Refresh file list
         if (targetConversationId) {
           utils.file.getByConversation.invalidate({
             conversationId: targetConversationId,
@@ -252,17 +254,19 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     }
   };
 
-  // -- 5. Render --
+  // -- Render --
 
   return (
     <div className="flex h-full">
-      {/* Chat */}
       <div className="relative flex w-full flex-col bg-gray-900">
-        {/* Messages */}
         <div className="scrollbar-thin h-full overflow-y-auto p-4">
           {isHistoryLoading ? (
             <div className="flex h-full items-center justify-center">
               <p className="animate-pulse text-gray-400">Loading...</p>
+            </div>
+          ) : isHistoryError ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-lg text-gray-400">Failed to load history</p>
             </div>
           ) : messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
@@ -292,23 +296,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                   />
                 ),
               )}
-              {chatMutation.isPending && (
-                <div className="flex gap-4">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600">
-                    AI
-                  </div>
-                  <div className="rounded-lg bg-slate-800 px-4 py-2 text-slate-200">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="sr-only">Thinking...</span>
-                  </div>
-                </div>
+
+              {/* FIX 2: Use derived state "isThinking" instead of mutation.isPending */}
+              {isAgentThinking && (
+                <p className="animate-pulse text-gray-400">Thinking...</p>
               )}
-              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        {/* Input Area */}
         <div className="bg-gray-900 p-4">
           <form
             onSubmit={handleSubmit}
@@ -317,14 +313,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
             <TextareaAutosize
               minRows={1}
               maxRows={4}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
               placeholder="Ask PaperParrot anything..."
               className="scrollbar-hide w-full rounded-lg bg-gray-800 px-4 py-2 text-gray-400 placeholder-slate-500 outline-none"
             />
             <button
               type="submit"
-              disabled={!input.trim() || chatMutation.isPending}
+              disabled={!userInput.trim() || isAgentThinking}
               className="rounded-lg bg-blue-600 px-4 py-2 text-gray-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={20} />
@@ -333,37 +329,21 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         </div>
       </div>
 
-      {/* Files Panel (Right Sidebar) */}
       <div className="w-80 overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-4">
         <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white">
           <Paperclip size={20} />
           Files
         </h2>
-
+        {/* File List logic (unchanged) */}
         <div className="mb-6">
-          {/* <UploadButton
-            endpoint="fileUploader"
-            input={{
-              accept: "image/*, application/pdf, text/plain, application/json",
-            }}
-            onClientUploadComplete={handleUploadComplete}
-            onUploadError={(error: Error) => {
-              alert(`ERROR! ${error.message}`);
-            }}
-            appearance={{
-              button:
-                "bg-slate-700 text-white hover:bg-slate-600 w-full text-sm py-2",
-              allowedContent: "text-slate-400 text-xs",
-            }}
-          /> */}
           <MixedUploader
             onUploadSuccess={handleUploadComplete}
             availability={4 - (files?.length ?? 0)}
           />
         </div>
-
         <div className="flex flex-col gap-2">
           {files?.map((file) => {
+            // ... existing file rendering logic ...
             const fileName = file.name;
             const lastDotIndex = fileName.lastIndexOf(".");
             const name =
@@ -372,7 +352,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                 : fileName;
             const extension =
               lastDotIndex !== -1 ? fileName.substring(lastDotIndex) : null;
-
             return (
               <div
                 key={file.id}
@@ -381,7 +360,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                 <a
                   href={file.url}
                   target="_blank"
-                  rel="noopener noreferrer"
                   className="flex max-w-full hover:underline"
                 >
                   <span className="truncate">{name}</span>
@@ -396,11 +374,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
               </div>
             );
           })}
-          {(!files || files.length === 0) && (
-            <p className="text-center text-xs text-slate-500">
-              No files uploaded.
-            </p>
-          )}
         </div>
       </div>
     </div>

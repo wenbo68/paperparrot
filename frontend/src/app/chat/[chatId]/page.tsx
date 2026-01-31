@@ -7,5 +7,7 @@ export default function ChatPage() {
   const params = useParams();
   const conversationId = params.chatId as string;
 
-  return <ChatInterface conversationId={conversationId} />;
+  // key={conversationId} forces React to destroy and recreate the component
+  // when the chat ID changes, ensuring a clean slate.
+  return <ChatInterface conversationId={conversationId} key={conversationId} />;
 }
