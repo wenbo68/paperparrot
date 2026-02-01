@@ -1,30 +1,31 @@
 "use client";
 
+import { useRef } from "react"; //
 import { useUploadThing } from "~/utils/uploadthing";
+import { customToast } from "./toast";
 
 interface MixedUploaderProps {
   onUploadSuccess: (
     files: { key: string; url: string; name: string }[],
+    toastId: string,
   ) => void;
   availability: number;
 }
 
-// Comprehensive list of text-based formats and PDF
-const ACCEPTED_FILES = [
-  "application/pdf",
-  "text/*", // Covers .txt, .csv, .html, .css, etc.
-].join(",");
+const ACCEPTED_FILES = ["application/pdf", "text/*"].join(",");
 
 export default function MixedUploader({
   onUploadSuccess,
   availability,
 }: MixedUploaderProps) {
+  const toastIdRef = useRef<string>("");
+
   const { startUpload, isUploading } = useUploadThing("mixedUploader", {
     onClientUploadComplete: (uploadedFiles) => {
-      onUploadSuccess(uploadedFiles);
+      onUploadSuccess(uploadedFiles, toastIdRef.current);
     },
     onUploadError: (error) => {
-      alert(`Error: ${error.message}`);
+      customToast.error(`Error: ${error.message}`, toastIdRef.current);
     },
   });
 
@@ -36,7 +37,6 @@ export default function MixedUploader({
           type="file"
           className="hidden"
           multiple
-          // Updated accept attribute
           accept={ACCEPTED_FILES}
           onChange={async (e) => {
             if (!e.target.files) return;
@@ -45,6 +45,10 @@ export default function MixedUploader({
               alert(`Too many files. You can only add ${availability} more.`);
               return;
             }
+
+            // 4. Trigger the toast HERE, immediately before upload starts
+            toastIdRef.current = customToast.loading("Uploading files...");
+
             await startUpload(files);
           }}
         />

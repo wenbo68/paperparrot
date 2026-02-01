@@ -15,6 +15,11 @@ export type DeleteFileResponse = {
   message: string;
 };
 
+export type DeleteConversationResponse = {
+  status: "success" | "error";
+  message: string;
+};
+
 export type ChatHistoryResponse = {
   history: {
     role: "user" | "assistant";
@@ -73,6 +78,20 @@ export const pythonApi = {
     });
     if (!res.ok) throw new Error("Failed to delete file");
     return res.json() as Promise<DeleteFileResponse>;
+  },
+
+  deleteConversation: async (
+    conversationId: string,
+  ): Promise<DeleteConversationResponse> => {
+    const res = await fetch(`${BASE_URL}/api/delete-conversation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+      }),
+    });
+    if (!res.ok) throw new Error("Failed to delete conversation");
+    return res.json() as Promise<DeleteConversationResponse>;
   },
 
   getChatHistory: async (

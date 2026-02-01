@@ -23,7 +23,7 @@ from langchain.agents import create_agent
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from dataclasses import dataclass
 
-from rag_utils import get_vector_store, delete_file_by_id
+from rag_utils import get_vector_store, delete_file_by_id, delete_conversation_by_id
 
 load_dotenv()
 search = GoogleSerperAPIWrapper()
@@ -135,6 +135,9 @@ class DeleteFileRequest(BaseModel):
     file_id: str
     conversation_id: str
 
+class DeleteConversationRequest(BaseModel):
+    conversation_id: str
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -239,6 +242,15 @@ def delete_file(request: DeleteFileRequest):
         return {"status": "success", "message": f"Deleted file {request.file_id}"}
     except Exception as e:
         print(f"Error deleting file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/delete-conversation")
+def delete_conversation(request: DeleteConversationRequest):
+    try:
+        delete_conversation_by_id(request.conversation_id)
+        return {"status": "success", "message": f"Deleted conversation {request.conversation_id}"}
+    except Exception as e:
+        print(f"Error deleting conversation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat")

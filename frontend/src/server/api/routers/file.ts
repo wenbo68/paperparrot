@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { files, conversations } from "~/server/db/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { pythonApi } from "~/lib/python-api";
 
 export const fileRouter = createTRPCRouter({
   create: protectedProcedure
@@ -12,14 +13,14 @@ export const fileRouter = createTRPCRouter({
         url: z.string().url(),
         key: z.string(),
         conversationId: z.string(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       // Verify conversation belongs to user
       const conversation = await ctx.db.query.conversations.findFirst({
         where: and(
           eq(conversations.id, input.conversationId),
-          eq(conversations.userId, ctx.session.user.id)
+          eq(conversations.userId, ctx.session.user.id),
         ),
       });
 
@@ -27,13 +28,27 @@ export const fileRouter = createTRPCRouter({
         throw new Error("Unauthorized or conversation not found");
       }
 
-      const [createdFile] = await ctx.db.insert(files).values({
-        name: input.name,
-        url: input.url,
-        key: input.key,
-        conversationId: input.conversationId,
-      }).returning();
-      
+      const [createdFile] = await ctx.db
+        .insert(files)
+        .values({
+          name: input.name,
+          url: input.url,
+          key: input.key,
+          conversationId: input.conversationId,
+        })
+        .returning();
+
+      if (!createdFile) {
+        throw new Error("Failed to create file in db");
+      }
+
+      await pythonApi.indexFile(
+        input.name,
+        createdFile.id,
+        input.url,
+        input.conversationId,
+      );
+
       return createdFile;
     }),
 
@@ -55,6 +70,7 @@ export const fileRouter = createTRPCRouter({
       }
 
       await ctx.db.delete(files).where(eq(files.id, input.id));
+      void pythonApi.deleteFile(input.id, file.conversationId);
     }),
 
   getByConversation: protectedProcedure
@@ -64,7 +80,7 @@ export const fileRouter = createTRPCRouter({
       const conversation = await ctx.db.query.conversations.findFirst({
         where: and(
           eq(conversations.id, input.conversationId),
-          eq(conversations.userId, ctx.session.user.id)
+          eq(conversations.userId, ctx.session.user.id),
         ),
       });
 

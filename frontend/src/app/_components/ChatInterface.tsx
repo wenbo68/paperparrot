@@ -9,7 +9,10 @@ import { Send, Trash2, Paperclip, Loader2 } from "lucide-react";
 import { marked } from "marked";
 import { v4 as uuidv4 } from "uuid";
 import TextareaAutosize from "react-textarea-autosize";
-import MixedUploader from "./MixedUploader";
+
+import FilesModal from "./FilesModal"; // Changed import
+import { customToast } from "./toast";
+import toast from "react-hot-toast";
 
 interface ChatInterfaceProps {
   conversationId?: string;
@@ -21,20 +24,22 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const utils = api.useUtils();
   const queryClient = useQueryClient();
 
-  const [userInput, setUserInput] = useState("");
+  const [userChatInput, setUserChatInput] = useState("");
   // New state for upload loading
-  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  // New state for file management modal
+  const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
 
   // 1. Capture initial query strictly once
   const initialQueryRef = useRef(searchParams.get("initialQuery"));
   const hasAutoSent = useRef(false);
 
-  // -- Data Fetching --
+  // -- Queries --
 
   const {
-    data: historyData,
-    isLoading: isHistoryLoading,
-    isError: isHistoryError,
+    data: chatHistoryData,
+    isLoading: isChatHistoryLoading,
+    isError: isChatHistoryError,
   } = useQuery({
     queryKey: ["chatHistory", conversationId],
     queryFn: () =>
@@ -50,10 +55,17 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         : undefined,
   });
 
-  const messages = historyData?.history || [];
+  const {
+    data: filesData,
+    isLoading: isFilesLoading,
+    isError: isFilesError,
+  } = api.file.getByConversation.useQuery(
+    { conversationId: conversationId! },
+    { enabled: !!conversationId },
+  );
 
-  const lastMessage = messages[messages.length - 1];
-  const isAgentThinking = lastMessage?.role === "user";
+  const messages = chatHistoryData?.history || [];
+  const isAgentThinking = messages[messages.length - 1]?.role === "user";
 
   // -- Mutations --
 
@@ -127,14 +139,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     },
   });
 
-  // -- File Handling Mutations (Optimistic Delete) --
-
-  const deleteBackendFileMutation = useMutation({
-    mutationFn: async (fileId: string) => {
-      if (conversationId) return pythonApi.deleteFile(fileId, conversationId);
-    },
-  });
-
+  const processUploadedFileMutation = api.file.create.useMutation();
   const deleteFileMutation = api.file.delete.useMutation({
     // 1. On Mutate: Update UI immediately
     onMutate: async ({ id }) => {
@@ -162,129 +167,92 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         { conversationId: conversationId! },
         context?.previousFiles,
       );
-      alert("Failed to delete file.");
-    },
-    // 3. On Success: Trigger backend delete & cleanup
-    onSuccess: (data, variables) => {
-      // Trigger Python deletion asynchronously (don't block UI)
-      deleteBackendFileMutation.mutate(variables.id);
+      customToast.error("Failed to delete file.");
     },
     // 4. Always refetch to ensure true sync
     onSettled: () => {
-      utils.file.getByConversation.invalidate({
+      void utils.file.getByConversation.invalidate({
         conversationId: conversationId!,
       });
     },
   });
+
+  // -- Handlers --
+
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userChatInput.trim() || isAgentThinking) return;
+
+    if (conversationId) {
+      sendAndReceiveChatMutation.mutate(userChatInput);
+      setUserChatInput("");
+      return;
+    }
+
+    const newId = uuidv4();
+    const encodedQuery = encodeURIComponent(userChatInput);
+    setUserChatInput("");
+    router.push(`/chat/${newId}?initialQuery=${encodedQuery}`);
+  };
 
   const handleFileDelete = (fileId: string) => {
     // We don't await this because optimistic updates handle the UI
     deleteFileMutation.mutate({ id: fileId });
   };
 
-  // -- Handlers --
-
-  useEffect(() => {
-    const initialQuery = initialQueryRef.current;
-    if (initialQuery && conversationId && !hasAutoSent.current) {
-      hasAutoSent.current = true;
-      sendAndReceiveChatMutation.mutate(initialQuery);
-      const newUrl = `/chat/${conversationId}`;
-      window.history.replaceState(null, "", newUrl);
-    }
-  }, [conversationId, sendAndReceiveChatMutation]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userInput.trim() || isAgentThinking) return;
-
-    if (conversationId) {
-      sendAndReceiveChatMutation.mutate(userInput);
-      setUserInput("");
-      return;
-    }
-
-    const newId = uuidv4();
-    const encodedQuery = encodeURIComponent(userInput);
-    setUserInput("");
-    router.push(`/chat/${newId}?initialQuery=${encodedQuery}`);
-  };
-
-  const { data: files } = api.file.getByConversation.useQuery(
-    { conversationId: conversationId! },
-    { enabled: !!conversationId },
-  );
-
-  const createFileMutation = api.file.create.useMutation();
-  const indexFileMutation = useMutation({
-    mutationFn: async ({
-      fileName,
-      fileId,
-      fileUrl,
-      convId,
-    }: {
-      fileName: string;
-      fileId: string;
-      fileUrl: string;
-      convId: string;
-    }) => {
-      return pythonApi.indexFile(fileName, fileId, fileUrl, convId);
-    },
-  });
-
-  const handleUploadComplete = async (
+  const processUploadedFiles = async (
     uploadedFiles: { key: string; url: string; name: string }[],
+    toastId: string,
   ) => {
     if (!uploadedFiles || uploadedFiles.length === 0) return;
 
-    // Start Loading State
-    setIsUploading(true);
+    setIsProcessingFiles(true);
+    customToast.loading("Processing files...", toastId);
 
+    let targetConversationId = conversationId;
     try {
-      let targetConversationId = conversationId;
-
       if (!targetConversationId) {
         targetConversationId = uuidv4();
         await createConversationMutation.mutateAsync({
           id: targetConversationId,
           name: new Date().toISOString().slice(0, 19).replace("T", " "),
         });
-        window.history.replaceState(null, "", `/chat/${targetConversationId}`);
+        // window.history.replaceState(null, "", `/chat/${targetConversationId}`);
+        router.replace(`/chat/${targetConversationId}`);
       }
 
       await Promise.all(
         uploadedFiles.map(async (file) => {
-          const createdFile = await createFileMutation.mutateAsync({
+          await processUploadedFileMutation.mutateAsync({
             name: file.name,
             url: file.url,
             key: file.key,
             conversationId: targetConversationId!,
           });
-
-          if (createdFile) {
-            await indexFileMutation.mutateAsync({
-              fileName: file.name,
-              fileId: createdFile.id,
-              fileUrl: file.url,
-              convId: targetConversationId!,
-            });
-          }
         }),
       );
 
+      customToast.success("Processing done!", toastId);
+    } catch (e) {
+      customToast.error("Error processing files. Please try again.", toastId);
+    } finally {
       void utils.file.getByConversation.invalidate({
         conversationId: targetConversationId,
       });
-
-      alert("Files processed successfully!");
-    } catch (e) {
-      console.error("File processing error", e);
-      alert("Error processing some files.");
-    } finally {
-      // End Loading State regardless of success/fail
-      setIsUploading(false);
+      setIsProcessingFiles(false);
     }
   };
+
+  // --- useEffects ---
+
+  useEffect(() => {
+    const initialQuery = initialQueryRef.current;
+    if (initialQuery && conversationId && !hasAutoSent.current) {
+      hasAutoSent.current = true;
+      sendAndReceiveChatMutation.mutate(initialQuery);
+      router.replace(`/chat/${conversationId}`);
+    }
+  }, [conversationId, sendAndReceiveChatMutation]);
 
   // -- Render --
 
@@ -292,11 +260,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     <div className="flex h-full">
       <div className="relative flex w-full flex-col bg-gray-900">
         <div className="scrollbar-thin h-full overflow-y-auto p-4">
-          {isHistoryLoading ? (
+          {isChatHistoryLoading ? (
             <div className="flex h-full items-center justify-center">
               <p className="animate-pulse text-gray-400">Loading...</p>
             </div>
-          ) : isHistoryError ? (
+          ) : isChatHistoryError ? (
             <div className="flex h-full items-center justify-center">
               <p className="text-lg text-gray-400">Failed to load history</p>
             </div>
@@ -338,20 +306,28 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
         <div className="bg-gray-900 p-4">
           <form
-            onSubmit={handleSubmit}
+            onSubmit={handleSendChat}
             className="mx-auto flex max-w-3xl gap-2"
           >
             <TextareaAutosize
               minRows={1}
               maxRows={4}
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
+              value={userChatInput}
+              onChange={(e) => setUserChatInput(e.target.value)}
               placeholder="Ask PaperParrot anything..."
               className="scrollbar-hide w-full rounded-lg bg-gray-800 px-4 py-2 text-gray-400 placeholder-slate-500 outline-none"
             />
             <button
+              type="button"
+              onClick={() => setIsFilesModalOpen(true)}
+              className="flex items-center justify-center rounded-lg bg-slate-800 px-3 text-gray-400 transition-colors hover:bg-slate-700 hover:text-white"
+              title="Manage Files"
+            >
+              <Paperclip size={20} />
+            </button>
+            <button
               type="submit"
-              disabled={!userInput.trim() || isAgentThinking}
+              disabled={!userChatInput.trim() || isAgentThinking}
               className="rounded-lg bg-blue-600 px-4 py-2 text-gray-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={20} />
@@ -360,63 +336,17 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         </div>
       </div>
 
-      <div className="w-80 overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-4">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white">
-          <Paperclip size={20} />
-          Files
-        </h2>
-
-        {/* Upload Loading State */}
-        <div className="mb-6">
-          {isUploading ? (
-            <div className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-800 py-8">
-              <Loader2 className="animate-spin text-blue-500" size={24} />
-              <span className="mt-2 text-sm text-slate-400">
-                Processing files...
-              </span>
-            </div>
-          ) : (
-            <MixedUploader
-              onUploadSuccess={handleUploadComplete}
-              availability={4 - (files?.length ?? 0)}
-            />
-          )}
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {files?.map((file) => {
-            const fileName = file.name;
-            const lastDotIndex = fileName.lastIndexOf(".");
-            const name =
-              lastDotIndex !== -1
-                ? fileName.substring(0, lastDotIndex)
-                : fileName;
-            const extension =
-              lastDotIndex !== -1 ? fileName.substring(lastDotIndex) : null;
-            return (
-              <div
-                key={file.id}
-                className="group relative flex items-center gap-2 rounded-md bg-slate-800 p-2 text-sm text-slate-300"
-              >
-                <a
-                  href={file.url}
-                  target="_blank"
-                  className="flex max-w-full hover:underline"
-                >
-                  <span className="truncate">{name}</span>
-                  {extension && <span className="flex-none">{extension}</span>}
-                </a>
-                <button
-                  onClick={() => handleFileDelete(file.id)}
-                  className="absolute right-2 hidden text-red-400 group-hover:block hover:text-red-300"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <FilesModal
+        isOpen={isFilesModalOpen}
+        onClose={() => setIsFilesModalOpen(false)}
+        files={filesData || []}
+        isLoading={isFilesLoading}
+        isError={isFilesError}
+        onDelete={handleFileDelete}
+        onUploadSuccess={processUploadedFiles}
+        isProcessing={isProcessingFiles}
+        availability={4 - (filesData?.length ?? 0)}
+      />
     </div>
   );
 }

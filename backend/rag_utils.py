@@ -42,6 +42,34 @@ def delete_file_by_id(file_id: str):
         
     # Engine automatically closes here
 
+def delete_conversation_by_id(conversation_id: str):
+    """
+    Deletes all embeddings associated with a specific conversation_id.
+    """
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL not set")
+
+    engine = create_engine(db_url)
+
+    with engine.begin() as conn:
+        stmt = text("DELETE FROM data_paperparrot_embeddings WHERE metadata_->>'conversation_id' = :cid")
+        conn.execute(stmt, {"cid": conversation_id})
+
+        # --- Delete LangGraph Checkpoints ---
+        # The 'thread_id' in these tables corresponds to our 'conversation_id'
+        
+        # 1. checkpoints
+        stmt_checkpoints = text("DELETE FROM checkpoints WHERE thread_id = :cid")
+        conn.execute(stmt_checkpoints, {"cid": conversation_id})
+
+        # 2. checkpoint_blobs
+        stmt_blobs = text("DELETE FROM checkpoint_blobs WHERE thread_id = :cid")
+        conn.execute(stmt_blobs, {"cid": conversation_id})
+
+        # 3. checkpoint_writes
+        stmt_writes = text("DELETE FROM checkpoint_writes WHERE thread_id = :cid")
+        conn.execute(stmt_writes, {"cid": conversation_id})
 
 def get_storage_context(vector_store):
     return StorageContext.from_defaults(vector_store=vector_store)

@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useMutation } from "@tanstack/react-query"; // Import standard useMutation
 import { api } from "~/trpc/react";
+import { pythonApi } from "~/lib/python-api";
 import {
   MessageSquare,
   Plus,
@@ -14,6 +16,8 @@ import {
   X,
   MoreVertical,
 } from "lucide-react";
+import { SidebarOptionsModal } from "./SidebarOptionsModal";
+import { SidebarRenameModal } from "./SidebarRenameModal";
 
 // --- Utility Hook for Long Press ---
 function useLongPress(callback: () => void, ms = 500) {
@@ -62,17 +66,58 @@ export function Sidebar({ className }: { className?: string }) {
 
   // Mutations
   const deleteMutation = api.conversation.delete.useMutation({
-    onSuccess: async () => {
-      await utils.conversation.getAll.invalidate();
-      if (selectedConv) router.push("/chat");
-      closeAllModals();
+    onMutate: async ({ id }) => {
+      await utils.conversation.getAll.cancel();
+      const previousConversations = utils.conversation.getAll.getData();
+
+      utils.conversation.getAll.setData(
+        undefined,
+        (old) => old?.filter((c) => c.id !== id) ?? [],
+      );
+
+      return { previousConversations };
+    },
+    onError: (err, newTodo, context) => {
+      utils.conversation.getAll.setData(
+        undefined,
+        context?.previousConversations,
+      );
+      alert("Failed to delete conversation.");
+    },
+    onSuccess: (data, variables) => {
+      if (selectedConv?.id === variables.id) {
+        router.push("/chat");
+      }
+    },
+    onSettled: () => {
+      utils.conversation.getAll.invalidate();
     },
   });
 
   const renameMutation = api.conversation.rename.useMutation({
+    onMutate: async ({ id, name }) => {
+      await utils.conversation.getAll.cancel();
+      const previousConversations = utils.conversation.getAll.getData();
+
+      utils.conversation.getAll.setData(
+        undefined,
+        (old) => old?.map((c) => (c.id === id ? { ...c, name } : c)) ?? [],
+      );
+
+      return { previousConversations };
+    },
+    onError: (err, newTodo, context) => {
+      utils.conversation.getAll.setData(
+        undefined,
+        context?.previousConversations,
+      );
+      alert("Failed to rename conversation.");
+    },
     onSuccess: async () => {
-      await utils.conversation.getAll.invalidate();
       closeAllModals();
+    },
+    onSettled: () => {
+      utils.conversation.getAll.invalidate();
     },
   });
 
@@ -98,12 +143,11 @@ export function Sidebar({ className }: { className?: string }) {
     }
   };
 
-  const handleRenameSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedConv || !newName.trim()) return;
+  const handleRenameSubmit = async (newNameVal: string) => {
+    if (!selectedConv || !newNameVal.trim()) return;
     await renameMutation.mutateAsync({
       id: selectedConv.id,
-      name: newName,
+      name: newNameVal,
     });
   };
 
@@ -155,76 +199,25 @@ export function Sidebar({ className }: { className?: string }) {
       </div>
 
       {/* --- Options Modal (Rename/Delete) --- */}
-      {showOptionsModal && selectedConv && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-          <div className="w-full max-w-xs overflow-hidden rounded-lg bg-slate-800 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-700 p-4">
-              <h3 className="font-medium text-white">Options</h3>
-              <button
-                onClick={closeAllModals}
-                className="text-slate-400 hover:text-white"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="flex flex-col p-2">
-              <button
-                onClick={() => {
-                  setNewName(selectedConv.name);
-                  setShowOptionsModal(false);
-                  setShowRenameModal(true);
-                }}
-                className="flex items-center gap-3 rounded-md p-3 text-left text-slate-300 hover:bg-slate-700 hover:text-white"
-              >
-                <Pencil size={18} />
-                Rename
-              </button>
-              <button
-                onClick={handleDelete}
-                className="flex items-center gap-3 rounded-md p-3 text-left text-red-400 hover:bg-slate-700 hover:text-red-300"
-              >
-                <Trash2 size={18} />
-                Delete Chat
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SidebarOptionsModal
+        isOpen={showOptionsModal && !!selectedConv}
+        onClose={closeAllModals}
+        onRename={() => {
+          setNewName(selectedConv?.name || "");
+          setShowOptionsModal(false);
+          setShowRenameModal(true);
+        }}
+        onDelete={handleDelete}
+      />
 
       {/* --- Rename Input Modal --- */}
-      {showRenameModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <form
-            onSubmit={handleRenameSubmit}
-            className="w-full max-w-sm rounded-lg bg-slate-800 p-6 shadow-xl"
-          >
-            <h3 className="mb-4 text-lg font-medium text-white">Rename Chat</h3>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="mb-4 w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeAllModals}
-                className="rounded-md px-4 py-2 text-sm text-slate-400 hover:bg-slate-700 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={renameMutation.isPending}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {renameMutation.isPending ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <SidebarRenameModal
+        isOpen={showRenameModal}
+        onClose={closeAllModals}
+        initialName={newName}
+        onRename={handleRenameSubmit}
+        isPending={renameMutation.isPending}
+      />
     </>
   );
 }
