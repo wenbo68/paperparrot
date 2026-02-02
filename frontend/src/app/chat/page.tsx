@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
-import { v4 as uuidv4 } from "uuid";
 import { Loader2 } from "lucide-react";
 
 export default function ChatRootPage() {
@@ -16,15 +15,12 @@ export default function ChatRootPage() {
     if (hasCreated.current) return;
     hasCreated.current = true;
 
-    const newId = uuidv4();
-    const name = new Date().toLocaleString();
-
     createMutation.mutate(
-      { id: newId, name },
+      {},
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
           // Only redirect after we CONFIRM the DB record exists
-          router.replace(`/chat/${newId}`);
+          router.replace(`/chat/${data?.id}`);
         },
         onError: (err) => {
           console.error("Failed to create session", err);

@@ -17,15 +17,19 @@ export const conversationRouter = createTRPCRouter({
   create: protectedProcedure
     .input(
       z.object({
-        name: z.string().min(1, "Invalid name"),
-        id: z.string().uuid().min(1, "Invalid id"),
+        name: z
+          .string()
+          .optional()
+          .default(() =>
+            new Date().toISOString().replace("T", " ").slice(0, 19),
+          ),
+        id: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const [conversation] = await ctx.db
         .insert(conversations)
         .values({
-          id: input.id,
           name: input.name,
           userId: ctx.session.user.id,
         })

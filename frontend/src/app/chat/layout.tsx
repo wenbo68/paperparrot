@@ -16,9 +16,7 @@ export default async function ChatLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <div className="flex-1 overflow-hidden bg-slate-950 text-white">
-        {children}
-      </div>
+      <div className="flex-1 overflow-hidden">{children}</div>
     </div>
   );
 }

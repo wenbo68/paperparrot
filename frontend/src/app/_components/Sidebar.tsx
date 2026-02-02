@@ -2,49 +2,12 @@
 
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useMutation } from "@tanstack/react-query"; // Import standard useMutation
+import { useState } from "react";
 import { api } from "~/trpc/react";
-import { pythonApi } from "~/lib/python-api";
-import {
-  MessageSquare,
-  Plus,
-  Trash2,
-  LogOut,
-  MoreHorizontal,
-  Pencil,
-  X,
-  MoreVertical,
-} from "lucide-react";
+import { LogOut, MoreVertical } from "lucide-react";
 import { SidebarOptionsModal } from "./SidebarOptionsModal";
 import { SidebarRenameModal } from "./SidebarRenameModal";
-
-// --- Utility Hook for Long Press ---
-function useLongPress(callback: () => void, ms = 500) {
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const start = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      callback();
-    }, ms);
-  }, [callback, ms]);
-
-  const stop = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  return {
-    onMouseDown: start,
-    onMouseUp: stop,
-    onMouseLeave: stop,
-    onTouchStart: start,
-    onTouchEnd: stop,
-  };
-}
+import { customToast } from "./toast";
 
 // --- Types ---
 type Conversation = {
@@ -56,7 +19,6 @@ type Conversation = {
 export function Sidebar({ className }: { className?: string }) {
   const router = useRouter();
   const utils = api.useUtils();
-  const { data: conversations, isLoading } = api.conversation.getAll.useQuery();
 
   // State for Modals
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
@@ -64,7 +26,31 @@ export function Sidebar({ className }: { className?: string }) {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [newName, setNewName] = useState("");
 
+  // Queries
+  const { data: conversations, isLoading } = api.conversation.getAll.useQuery();
+
   // Mutations
+  const createMutation = api.conversation.create.useMutation({
+    onMutate: async () => {
+      return { toastId: customToast.loading("Creating new chat...") };
+    },
+    onSuccess: (data, variables, context) => {
+      // Navigate DIRECTLY to the specific chat ID
+      // This skips the problematic intermediate /chat page entirely
+      router.push(`/chat/${data?.id ?? ""}`);
+      customToast.success("Created new chat!", context?.toastId);
+    },
+    onError: (err, variables, context) => {
+      customToast.error(
+        "Create new chat failed. Please try again.",
+        context?.toastId,
+      );
+    },
+    onSettled: async () => {
+      await utils.conversation.getAll.invalidate();
+    },
+  });
+
   const deleteMutation = api.conversation.delete.useMutation({
     onMutate: async ({ id }) => {
       await utils.conversation.getAll.cancel();
@@ -75,22 +61,22 @@ export function Sidebar({ className }: { className?: string }) {
         (old) => old?.filter((c) => c.id !== id) ?? [],
       );
 
-      return { previousConversations };
+      return { previousConversations, createNewChat: selectedConv?.id === id };
+    },
+    onSuccess: (data, variables, context) => {
+      if (context?.createNewChat) {
+        createMutation.mutate({});
+      }
     },
     onError: (err, newTodo, context) => {
+      customToast.error("Delete chat failed. Please try again.");
       utils.conversation.getAll.setData(
         undefined,
         context?.previousConversations,
       );
-      alert("Failed to delete conversation.");
     },
-    onSuccess: (data, variables) => {
-      if (selectedConv?.id === variables.id) {
-        router.push("/chat");
-      }
-    },
-    onSettled: () => {
-      utils.conversation.getAll.invalidate();
+    onSettled: async () => {
+      await utils.conversation.getAll.invalidate();
     },
   });
 
@@ -106,30 +92,32 @@ export function Sidebar({ className }: { className?: string }) {
 
       return { previousConversations };
     },
+    onSuccess: async () => {
+      handleCloseModals();
+    },
     onError: (err, newTodo, context) => {
       utils.conversation.getAll.setData(
         undefined,
         context?.previousConversations,
       );
-      alert("Failed to rename conversation.");
+      customToast.error("Rename chat failed. Please try again.");
     },
-    onSuccess: async () => {
-      closeAllModals();
-    },
-    onSettled: () => {
-      utils.conversation.getAll.invalidate();
+    onSettled: async () => {
+      await utils.conversation.getAll.invalidate();
     },
   });
 
-  // Actions
-  const handleCreate = () => router.push("/chat");
-
-  const openOptions = (conv: Conversation) => {
+  // handlers
+  // 3. Replace the old handleCreate function with this:
+  const handleCreate = () => {
+    // Mutate directly
+    createMutation.mutate({});
+  };
+  const handleOpenOptions = (conv: Conversation) => {
     setSelectedConv(conv);
     setShowOptionsModal(true);
   };
-
-  const closeAllModals = () => {
+  const handleCloseModals = () => {
     setShowOptionsModal(false);
     setShowRenameModal(false);
     setSelectedConv(null);
@@ -175,7 +163,7 @@ export function Sidebar({ className }: { className?: string }) {
                 <ConversationItem
                   key={conv.id}
                   conversation={conv}
-                  onOpenOptions={() => openOptions(conv)}
+                  onOpenOptions={() => handleOpenOptions(conv)}
                 />
               ))}
               {conversations?.length === 0 && (
@@ -201,7 +189,7 @@ export function Sidebar({ className }: { className?: string }) {
       {/* --- Options Modal (Rename/Delete) --- */}
       <SidebarOptionsModal
         isOpen={showOptionsModal && !!selectedConv}
-        onClose={closeAllModals}
+        onClose={handleCloseModals}
         onRename={() => {
           setNewName(selectedConv?.name || "");
           setShowOptionsModal(false);
@@ -213,7 +201,7 @@ export function Sidebar({ className }: { className?: string }) {
       {/* --- Rename Input Modal --- */}
       <SidebarRenameModal
         isOpen={showRenameModal}
-        onClose={closeAllModals}
+        onClose={handleCloseModals}
         initialName={newName}
         onRename={handleRenameSubmit}
         isPending={renameMutation.isPending}
@@ -233,21 +221,12 @@ function ConversationItem({
   const params = useParams(); // Get URL params
 
   // Check if this conversation is active based on URL
-  // Assuming route is /chat/[chatId]
-  const isActive = params?.chatId === conversation.id; // Adjust 'id' if your param name is different (e.g. chatId)
-
-  // Long press hook
-  const longPressProps = useLongPress(() => {
-    onOpenOptions();
-  }, 600); // 600ms hold time
+  const isActive = params?.chatId === conversation.id;
 
   return (
     <div className="group relative">
       <Link
         href={`/chat/${conversation.id}`}
-        {...longPressProps} // Attach long press events
-        // Disable context menu on mobile to prevent default browser menu on long press
-        onContextMenu={(e) => e.preventDefault()}
         className={`flex overflow-hidden rounded-lg p-3 text-gray-400 transition-colors group-hover:pr-10 group-hover:text-blue-400 ${
           isActive ? "bg-gray-800" : ""
         }`}
@@ -262,7 +241,7 @@ function ConversationItem({
           e.stopPropagation();
           onOpenOptions();
         }}
-        className={`absolute top-1/2 right-2 hidden -translate-y-1/2 rounded p-1 text-gray-400 group-hover:block hover:bg-gray-700`}
+        className={`absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-gray-400 hover:bg-gray-700`}
         aria-label="Options"
       >
         <MoreVertical size={16} />

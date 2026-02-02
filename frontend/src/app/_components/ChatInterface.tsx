@@ -254,6 +254,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
             onSubmit={handleSendChat}
             className="mx-auto flex max-w-3xl gap-2"
           >
+            <button
+              type="button"
+              onClick={() => setIsFilesModalOpen(true)}
+              className="flex items-center justify-center rounded-lg bg-gray-800 px-3 text-gray-300 transition-colors hover:bg-gray-700"
+              title="Manage Files"
+            >
+              <Paperclip size={20} />
+            </button>
             <TextareaAutosize
               minRows={1}
               maxRows={4}
@@ -263,17 +271,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
               className="scrollbar-hide w-full rounded-lg bg-gray-800 px-4 py-2 text-gray-400 placeholder-gray-500 outline-none"
             />
             <button
-              type="button"
-              onClick={() => setIsFilesModalOpen(true)}
-              className="flex items-center justify-center rounded-lg bg-gray-800 px-3 text-gray-300 transition-colors hover:bg-gray-700"
-              title="Manage Files"
-            >
-              <Paperclip size={20} />
-            </button>
-            <button
               type="submit"
               disabled={!userChatInput.trim() || isAgentThinking}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-gray-300 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-indigo-600 px-3 text-gray-300 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={20} />
             </button>
