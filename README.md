@@ -314,8 +314,9 @@
 - but inside flex column, by default, both block and inline will only fill the width of parent
 - only direct child of flex are affected
 
+# Future features
+
+- automatically delete empty conversations
+
 # Todo
 
-- 4 chats max; 4 files max; 8mb max
-- add upload button to chat input
-- merge left/right sidebar
