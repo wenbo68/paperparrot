@@ -5,6 +5,8 @@ import { useUploadThing } from "~/utils/uploadthing";
 import { customToast } from "./toast";
 
 interface MixedUploaderProps {
+  // 1. Add conversationId to props
+  conversationId: string;
   onUploadSuccess: (
     files: { key: string; url: string; name: string }[],
     toastId: string,
@@ -15,6 +17,7 @@ interface MixedUploaderProps {
 const ACCEPTED_FILES = ["application/pdf", "text/*"].join(",");
 
 export default function MixedUploader({
+  conversationId, // <--- Destructure it
   onUploadSuccess,
   availability,
 }: MixedUploaderProps) {
@@ -31,7 +34,7 @@ export default function MixedUploader({
 
   return (
     <div>
-      <label className="cursor-pointer rounded bg-blue-500 px-4 py-2 text-white transition-colors hover:bg-blue-600">
+      <label className="cursor-pointer rounded bg-blue-500 px-4 py-2 text-gray-300 transition-colors hover:bg-blue-600">
         {isUploading ? "Uploading..." : `Upload`}
         <input
           type="file"
@@ -49,7 +52,11 @@ export default function MixedUploader({
             // 4. Trigger the toast HERE, immediately before upload starts
             toastIdRef.current = customToast.loading("Uploading files...");
 
-            await startUpload(files);
+            // 2. PASS the input to startUpload
+            // This MUST match the .input() schema in core.ts
+            await startUpload(files, {
+              conversationId: conversationId,
+            });
           }}
         />
       </label>

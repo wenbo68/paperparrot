@@ -7,60 +7,57 @@ import { pythonApi } from "~/lib/python-api";
 import { api } from "~/trpc/react";
 import { Send, Trash2, Paperclip, Loader2 } from "lucide-react";
 import { marked } from "marked";
-import { v4 as uuidv4 } from "uuid";
 import TextareaAutosize from "react-textarea-autosize";
 
-import FilesModal from "./FilesModal"; // Changed import
+import FilesModal from "./FilesModal";
 import { customToast } from "./toast";
-import toast from "react-hot-toast";
 
 interface ChatInterfaceProps {
-  conversationId?: string;
+  conversationId: string; // This is now REQUIRED
 }
 
 export function ChatInterface({ conversationId }: ChatInterfaceProps) {
+  // Guard clause: This component shouldn't render without an ID
+  if (!conversationId) return null;
+
   const router = useRouter();
-  const searchParams = useSearchParams();
   const utils = api.useUtils();
-  const queryClient = useQueryClient();
+  // const queryClient = useQueryClient();
 
   const [userChatInput, setUserChatInput] = useState("");
-  // New state for upload loading
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
-  // New state for file management modal
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
 
-  // 1. Capture initial query strictly once
-  const initialQueryRef = useRef(searchParams.get("initialQuery"));
-  const hasAutoSent = useRef(false);
-
   // -- Queries --
-
   const {
     data: chatHistoryData,
     isLoading: isChatHistoryLoading,
     isError: isChatHistoryError,
-  } = useQuery({
-    queryKey: ["chatHistory", conversationId],
-    queryFn: () =>
-      conversationId
-        ? pythonApi.getChatHistory(conversationId)
-        : Promise.resolve({ history: [] }),
-    enabled: !!conversationId,
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
-    initialData:
-      initialQueryRef.current && conversationId
-        ? { history: [{ role: "user", content: initialQueryRef.current }] }
-        : undefined,
-  });
+  } = api.conversation.getHistory.useQuery(
+    { conversationId },
+    {
+      enabled: !!conversationId,
+      refetchOnWindowFocus: false,
+      retry: (failureCount, error) => {
+        // Don't retry if the server said "NOT_FOUND" or "UNAUTHORIZED"
+        if (
+          error.data?.code === "NOT_FOUND" ||
+          error.data?.code === "UNAUTHORIZED"
+        ) {
+          return false;
+        }
+        // Otherwise, retry up to 3 times (for network timeouts, etc.)
+        return failureCount < 3;
+      },
+    },
+  );
 
   const {
     data: filesData,
     isLoading: isFilesLoading,
     isError: isFilesError,
   } = api.file.getByConversation.useQuery(
-    { conversationId: conversationId! },
+    { conversationId },
     { enabled: !!conversationId },
   );
 
@@ -69,73 +66,53 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
   // -- Mutations --
 
-  const createConversationMutation = api.conversation.create.useMutation({
-    onSuccess: async () => {
-      void utils.conversation.getAll.invalidate();
-    },
-  });
+  const sendMessageMutation = api.conversation.sendMessage.useMutation({
+    onMutate: async ({ message }) => {
+      // 1. Cancel ongoing invalidation (from previous call's onSettled)
+      // so that the new optimistic update (from current call's onMutate and onSuccess) will not be overwritten
+      await utils.conversation.getHistory.cancel({ conversationId });
 
-  const sendAndReceiveChatMutation = useMutation({
-    mutationFn: async (msg: string) => {
-      if (!conversationId)
-        throw new Error("Conversation ID missing during chat mutation");
-
-      if (messages.length <= 1) {
-        try {
-          await createConversationMutation.mutateAsync({
-            id: conversationId,
-            name: new Date().toISOString().replace("T", " ").slice(0, 19),
-          });
-        } catch (e) {
-          // Ignore "Already exists" errors
-        }
-      }
-
-      return await pythonApi.chat(conversationId, msg);
-    },
-    onMutate: async (newMsg) => {
-      await queryClient.cancelQueries({
-        queryKey: ["chatHistory", conversationId],
+      // 2. Snapshot the previous value for rollback
+      const previousHistory = utils.conversation.getHistory.getData({
+        conversationId,
       });
 
-      const previousData = queryClient.getQueryData([
-        "chatHistory",
-        conversationId,
-      ]);
-
-      queryClient.setQueryData(["chatHistory", conversationId], (old: any) => {
+      // 3. Optimistically update with user's message
+      utils.conversation.getHistory.setData({ conversationId }, (old) => {
         const oldHistory = old?.history || [];
-        const isDuplicate =
-          oldHistory.length > 0 &&
-          oldHistory[oldHistory.length - 1].content === newMsg;
-
-        if (isDuplicate) return old;
-
         return {
           ...old,
-          history: [...oldHistory, { role: "user", content: newMsg }],
+          history: [...oldHistory, { role: "user", content: message }],
         };
       });
 
-      return { previousData };
+      return { previousHistory };
     },
     onError: (err, newMsg, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(
-          ["chatHistory", conversationId],
-          context.previousData,
-        );
-      }
-      alert("Failed to send message.");
+      // Rollback to snapshot on error
+      utils.conversation.getHistory.setData(
+        { conversationId },
+        context?.previousHistory,
+      );
+      customToast.error("Failed to send message: " + err.message);
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["chatHistory", conversationId], (old: any) => {
+      // 4. Manually update with the real assistant response (Immediate feedback)
+      utils.conversation.getHistory.setData({ conversationId }, (old) => {
         const oldHistory = old?.history || [];
         return {
           ...old,
           history: [...oldHistory, { role: "assistant", content: data.answer }],
         };
       });
+    },
+    onSettled: async () => {
+      // 5. Trigger a background refetch to ensure true consistency with the DB
+      // This happens silently without showing a loading spinner
+
+      // await is used here in case you ever use mutateAsync
+      // if you use mutateAsync, all lines after mutateAsync will need to wait for this invalidate
+      await utils.conversation.getHistory.invalidate({ conversationId });
     },
   });
 
@@ -170,11 +147,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
       customToast.error("Failed to delete file.");
     },
     // 4. Always refetch to ensure true sync
-    onSettled: () => {
-      void utils.file.getByConversation.invalidate({
-        conversationId: conversationId!,
-      });
-    },
+    onSettled: () =>
+      utils.file.getByConversation.invalidate({ conversationId }),
   });
 
   // -- Handlers --
@@ -183,20 +157,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     e.preventDefault();
     if (!userChatInput.trim() || isAgentThinking) return;
 
-    if (conversationId) {
-      sendAndReceiveChatMutation.mutate(userChatInput);
-      setUserChatInput("");
-      return;
-    }
-
-    const newId = uuidv4();
-    const encodedQuery = encodeURIComponent(userChatInput);
+    // Much simpler! No check for missing ID, no creation logic.
+    sendMessageMutation.mutate({
+      conversationId,
+      message: userChatInput,
+    });
     setUserChatInput("");
-    router.push(`/chat/${newId}?initialQuery=${encodedQuery}`);
   };
 
   const handleFileDelete = (fileId: string) => {
-    // We don't await this because optimistic updates handle the UI
     deleteFileMutation.mutate({ id: fileId });
   };
 
@@ -204,55 +173,31 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
     uploadedFiles: { key: string; url: string; name: string }[],
     toastId: string,
   ) => {
-    if (!uploadedFiles || uploadedFiles.length === 0) return;
+    if (!uploadedFiles?.length) return;
 
     setIsProcessingFiles(true);
     customToast.loading("Processing files...", toastId);
 
-    let targetConversationId = conversationId;
     try {
-      if (!targetConversationId) {
-        targetConversationId = uuidv4();
-        await createConversationMutation.mutateAsync({
-          id: targetConversationId,
-          name: new Date().toISOString().slice(0, 19).replace("T", " "),
-        });
-        // window.history.replaceState(null, "", `/chat/${targetConversationId}`);
-        router.replace(`/chat/${targetConversationId}`);
-      }
-
+      // Simply iterate. We KNOW conversationId exists and is valid.
       await Promise.all(
-        uploadedFiles.map(async (file) => {
-          await processUploadedFileMutation.mutateAsync({
+        uploadedFiles.map((file) =>
+          processUploadedFileMutation.mutateAsync({
             name: file.name,
             url: file.url,
             key: file.key,
-            conversationId: targetConversationId!,
-          });
-        }),
+            conversationId: conversationId,
+          }),
+        ),
       );
-
       customToast.success("Processing done!", toastId);
     } catch (e) {
-      customToast.error("Error processing files. Please try again.", toastId);
+      customToast.error("Error processing files.", toastId);
     } finally {
-      void utils.file.getByConversation.invalidate({
-        conversationId: targetConversationId,
-      });
+      void utils.file.getByConversation.invalidate({ conversationId });
       setIsProcessingFiles(false);
     }
   };
-
-  // --- useEffects ---
-
-  useEffect(() => {
-    const initialQuery = initialQueryRef.current;
-    if (initialQuery && conversationId && !hasAutoSent.current) {
-      hasAutoSent.current = true;
-      sendAndReceiveChatMutation.mutate(initialQuery);
-      router.replace(`/chat/${conversationId}`);
-    }
-  }, [conversationId, sendAndReceiveChatMutation]);
 
   // -- Render --
 
@@ -266,11 +211,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
             </div>
           ) : isChatHistoryError ? (
             <div className="flex h-full items-center justify-center">
-              <p className="text-lg text-gray-400">Failed to load history</p>
+              <p className="text-gray-400">Failed to load chat history</p>
             </div>
           ) : messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
-              <p className="text-lg text-gray-400">Where should we begin?</p>
+              <p className="text-gray-400">Where should we begin?</p>
             </div>
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -315,12 +260,12 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
               value={userChatInput}
               onChange={(e) => setUserChatInput(e.target.value)}
               placeholder="Ask PaperParrot anything..."
-              className="scrollbar-hide w-full rounded-lg bg-gray-800 px-4 py-2 text-gray-400 placeholder-slate-500 outline-none"
+              className="scrollbar-hide w-full rounded-lg bg-gray-800 px-4 py-2 text-gray-400 placeholder-gray-500 outline-none"
             />
             <button
               type="button"
               onClick={() => setIsFilesModalOpen(true)}
-              className="flex items-center justify-center rounded-lg bg-slate-800 px-3 text-gray-400 transition-colors hover:bg-slate-700 hover:text-white"
+              className="flex items-center justify-center rounded-lg bg-gray-800 px-3 text-gray-300 transition-colors hover:bg-gray-700"
               title="Manage Files"
             >
               <Paperclip size={20} />
@@ -328,7 +273,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
             <button
               type="submit"
               disabled={!userChatInput.trim() || isAgentThinking}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-gray-300 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-gray-300 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={20} />
             </button>
@@ -339,6 +284,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
       <FilesModal
         isOpen={isFilesModalOpen}
         onClose={() => setIsFilesModalOpen(false)}
+        conversationId={conversationId}
         files={filesData || []}
         isFilesLoading={isFilesLoading}
         isFilesError={isFilesError}

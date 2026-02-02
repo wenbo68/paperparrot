@@ -6,6 +6,7 @@ import MixedUploader from "./MixedUploader";
 interface FilesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  conversationId: string; // Add this
   files: { id: string; name: string; url: string; key: string }[];
   isFilesLoading: boolean;
   isFilesError: boolean;
@@ -22,6 +23,7 @@ export default function FilesModal({
   isOpen,
   onClose,
   files,
+  conversationId,
   isFilesLoading,
   isFilesError,
   onDelete,
@@ -64,7 +66,6 @@ export default function FilesModal({
             </div>
           ) : (
             <>
-              {" "}
               {/* Upload Section */}
               <div className="mb-6">
                 <h3 className="mb-2 text-sm font-medium text-slate-400">
@@ -79,6 +80,7 @@ export default function FilesModal({
                   </div>
                 ) : (
                   <MixedUploader
+                    conversationId={conversationId}
                     onUploadSuccess={onUploadSuccess}
                     availability={availability}
                   />
