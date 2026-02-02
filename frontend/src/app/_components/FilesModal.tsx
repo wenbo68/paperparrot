@@ -12,6 +12,7 @@ interface FilesModalProps {
   onDelete: (fileId: string) => void;
   onUploadSuccess: (
     files: { key: string; url: string; name: string }[],
+    toastId: string,
   ) => void;
   isProcessing: boolean;
   availability: number;

@@ -340,8 +340,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
         isOpen={isFilesModalOpen}
         onClose={() => setIsFilesModalOpen(false)}
         files={filesData || []}
-        isLoading={isFilesLoading}
-        isError={isFilesError}
+        isFilesLoading={isFilesLoading}
+        isFilesError={isFilesError}
         onDelete={handleFileDelete}
         onUploadSuccess={processUploadedFiles}
         isProcessing={isProcessingFiles}
