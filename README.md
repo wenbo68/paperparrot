@@ -22,7 +22,43 @@
 
 # Reminders
 
-### architecture
+### debugging llm: python code might be right, but llm behavior or thinking process might be wrong (or it might just hallucinate)
+
+1. you find llm doing wrong things in langsmith to a certain user query
+2. add the query to your evaluation dataset (can be done/created within langsmith via "add to dataset"), which contains...
+  - input/query
+    - the good: queries the model must get right every time
+    - the bad: queries the model previously failed
+    - the hard: tricky queries that test reasoning limits
+  - expected output: the perfect answer you want the LLM to generate
+  - expected context: the list of nodes/chunks that should be retrieved (if you are using rag)
+3. first check RAG if you have one
+  - if retrieved nodes are wrong/missing, you need better parsing/chunking or better embedding models
+4. switch to best inference model first and evaluate using the same query
+  - if better inference fails too: your system prompt is garbage OR the task is impossible
+  - if better inference works...
+    - you can either just use the better model or route easy queries to simple inference and hard queries to more costly inference
+    - OR proceed with the following steps
+5. system prompt engineering: industry system prompts can be 2000+ words
+  - manual few-shotting: add a generalized version of the query and the correct behavior or thought process to the system prompt
+    - only add 0-5 examples to system prompt
+  - dynamic few-shotting: let rag retrieve few-shot examples and add to system prompt
+    - 5-50 examples in vector database
+6. if still fails OR if too many few-shots OR if latency issues from few-shotting...
+  - if it's a knowledge problem: add rag or internet search
+  - if it's a behavior/style problem: fine tune the inference model
+
+### security (next.js + python backend)
+- do not let your frontend call python apis directly
+- your frontend should only call trpc procedures, which validates the request and call your python apis
+  - trpc server acts as a proxy in this case
+  - 3 benefits
+    1. your python apis don't need to validate, and you don't want your python backend to validate requests because...
+      1. nextjs has the user's Authjs cookies; python doesnt
+      2. dont need to set up cors in python backend because only trpc server is calling it
+      3. hackers can only attack your trpc endpoints not your python backend endpoints (fewer requests for python backend paas to handle)
+
+### system design
 
 ##### compute (app server) infrastructure: stateless (each request is separate; nothing will span across requests)
 
