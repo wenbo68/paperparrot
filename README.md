@@ -26,27 +26,27 @@
 
 1. you find llm doing wrong things in langsmith to a certain user query
 2. add the query to your evaluation dataset (can be done/created within langsmith via "add to dataset"), which contains...
-  - input/query
-    - the good: queries the model must get right every time
-    - the bad: queries the model previously failed
-    - the hard: tricky queries that test reasoning limits
-  - expected output: the perfect answer you want the LLM to generate
-  - expected context: the list of nodes/chunks that should be retrieved (if you are using rag)
+    - input/query
+        - the good: queries the model must get right every time
+        - the bad: queries the model previously failed
+        - the hard: tricky queries that test reasoning limits
+    - expected output: the perfect answer you want the LLM to generate
+    - expected context: the list of nodes/chunks that should be retrieved (if you are using rag)
 3. first check RAG if you have one
-  - if retrieved nodes are wrong/missing, you need better parsing/chunking or better embedding models
+    - if retrieved nodes are wrong/missing, you need better parsing/chunking or better embedding models
 4. switch to best inference model first and evaluate using the same query
-  - if better inference fails too: your system prompt is garbage OR the task is impossible
-  - if better inference works...
-    - you can either just use the better model or route easy queries to simple inference and hard queries to more costly inference
-    - OR proceed with the following steps
+    - if better inference fails too: your system prompt is garbage OR the task is impossible
+    - if better inference works...
+        - you can either just use the better model or route easy queries to simple inference and hard queries to more costly inference
+        - OR proceed with the following steps
 5. system prompt engineering: industry system prompts can be 2000+ words
-  - manual few-shotting: add a generalized version of the query and the correct behavior or thought process to the system prompt
-    - only add 0-5 examples to system prompt
-  - dynamic few-shotting: let rag retrieve few-shot examples and add to system prompt
-    - 5-50 examples in vector database
+    - manual few-shotting: add a generalized version of the query and the correct behavior or thought process to the system prompt
+        - only add 0-5 examples to system prompt
+    - dynamic few-shotting: let rag retrieve few-shot examples and add to system prompt
+        - 5-50 examples in vector database
 6. if still fails OR if too many few-shots OR if latency issues from few-shotting...
-  - if it's a knowledge problem: add rag or internet search
-  - if it's a behavior/style problem: fine tune the inference model
+    - if it's a knowledge problem: add rag or internet search
+    - if it's a behavior/style problem: fine tune the inference model
 
 ### security (next.js + python backend)
 - do not let your frontend call python apis directly
@@ -60,7 +60,7 @@
 
 ### system design
 
-##### compute (app server) infrastructure: stateless (each request is separate; nothing will span across requests)
+#### compute (app server) infrastructure: stateless (each request is separate; nothing will span across requests)
 
 1. on-premise: physical server (anything that's not on-premise is cloud)
 
@@ -103,7 +103,7 @@
 - certain user requests will go directly to the closest cdn node for much faster responses
 - example: vercel edge (only middleware code uses edge by default; other codes won't use edge unless specified)
 
-##### storage (db server) infrastructure: stateful (some info will span across requests, eg session info)
+#### storage (db server) infrastructure: stateful (some info will span across requests, eg session info)
 
 1. on premise
 2. iaas
@@ -124,7 +124,7 @@
 - and up infinitely (but each provider implements differently)
 - example: aws aurora serverless, neon, upstash, pinecone
 
-##### cache
+#### cache
 
 1. cdn
 
@@ -135,7 +135,7 @@
 
 ### scaling: when and how
 
-##### app server scaling
+#### app server scaling
 
 - you scale when your app server doesn't have enough RAM/CPU
 - make sure you delete old logs & docker images so you don't have to worry abt disk space
@@ -169,7 +169,7 @@
 - vertical: go to settings -> change memory size or cpu
 - horizontal: do nothing... serverless automatically means infinite horizontal scaling
 
-##### db server scaling
+#### db server scaling
 
 - you scale for RAM/CPU and for disk space and disk speed (larger disks are faster in cloud)
 - writes are often scaled vertically
@@ -203,7 +203,7 @@
 
 ### regarding ai stack/deployment
 
-##### stateless (app logic)
+#### stateless (app logic)
 
 1. frontend code
 
@@ -215,13 +215,13 @@
 - stack: uses python; langchain typescript is usable but llamaindex typescript is not good
 - deployment: paas (eg railway/render); can't deploy ai backend on serverless (eg vercel) b/c ai takes too long to run (will get shut down by vercel)
 
-##### stateful (db)
+#### stateful (db)
 
 1. app/user data: paas (eg neon)
 2. vectors: paas (eg neon pgvector, pinecone), caas/iaas/onpremise (eg chromadb)
 3. checkpoints: paas (eg neon)
 
-##### self-hosted models (when you don't wanna use cloud apis)
+#### self-hosted models (when you don't wanna use cloud apis)
 
 1. inference: ml paas (eg aws sagemaker)
 
@@ -242,24 +242,24 @@
     - if you don't want to deploy the embedding model as a separate container in your backend server, you can just deploy it on sagemaker
   - devops says they only monitor sagemaker endpoints and don't want to monitor models in docker containers
 
-##### cache
+#### cache
 
 1. rag files: cdn (eg uploadthing)
 
-##### cache/cdn
+#### cache/cdn
 
 - blob storage: uploadthing
 
 ### rag
 
-##### indexing: includes parsing, chunking, creating embeddings, and creating the index
+#### indexing: includes parsing, chunking, creating embeddings, and creating the index
 
 - Document obj: a container for an entire file (eg a whole pdf). Holds both text and metadata
 - Node: a chunk of a document obj. Holds text (or embeddings of that text), metadata, relationships with the doc.
 - Collection: a vector db can have many collections. Each collection has nodes from different documents. Each collection has a separate vector space for the embeddings.
 - Index: a data structure that allows you to retrieve easily from 1 collection. Each collection has its own index.
 
-##### llamaindex
+#### llamaindex
 
 - Does different parsing/chunking for you based on your file
 - You just need 2 lines of code that uses SimpleDirectoryReader and VectorStoreIndex
@@ -269,13 +269,13 @@
 
 ### agent/workflow orchestration
 
-##### langchain vs langgraph
+#### langchain vs langgraph
 
 - langchain: allows workflow without loops
 - langgraph: allows loops in the workflow (eg model can check its own response and regenerate the response if it was bad)
 - langgraph is built on top of langchain
 
-##### langchain inference model selection methods
+#### langchain inference model selection methods
 
 1. Using provider library, eg. from openai import OpenAI
 
@@ -292,7 +292,7 @@
 - Pros: just use a different string when you switch model; standard for langchain/langgraph since late 2024
 - Cons: some milliseconds of latency looking up correct models dynamically
 
-##### 2026 inference model selection standards
+#### 2026 inference model selection standards
 
 1. LangGraph
 
@@ -309,7 +309,7 @@
 
 - Code: write everything in openai code, then call the gateway, which decides what model to send request to
 
-##### langchain type safety
+#### langchain type safety
 
 1. Inputs (tools): should be strictly typed
 
@@ -327,7 +327,7 @@
 - in langchain, hard to force types on memory
 - in langgraph, can use pydantic/TypedDict to define memory structure
 
-##### langchain memory
+#### langchain memory
 
 1. short-term memory: memory within 1 conversation (each conversation has a different thread id)
 
@@ -341,7 +341,7 @@
 
 ### frontend
 
-##### flex
+#### flex
 - flex-1 doesn't not make it a flexbox; it only works on items within a flexbox
 
 - block fill the width of parent by default
