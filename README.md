@@ -20,6 +20,40 @@
 
 # Reminders
 
+### guardrails
+- guardrails are mostly deterministic to ensure rules/laws are followed
+#### categories
+1. input
+    - where: checks user input before it reaches llm
+    - goal: stops jailbreak, prompt injections, toxic inputs, etc.
+    - example
+        - LlamaGuard 4: multimodal; 13 harzrd categories (for user input)
+        - Lakera Guard: good against prompt injection
+2. RAG
+    - where: checks retrieved nodes before it reaches inference OR checks inference answers against the retrieved nodes
+    - goal: stops irrelevant documents from reaching inference, context injection (hacker puts prompts in uploaded files), etc.
+    - example
+        - NVIDIA NeMo Guardrails: good for checking relevance of retrieved nodes (uses similarity scores)
+        - DeepEval: stops hallucination by ensuring inference answer is supported by retrieved nodes
+3. agentic
+    - where: during llm/agent workflow
+    - goal: stops infinite loops, too much api credit usage, unauthorized execution, etc.
+    - example
+        - langgraph built-ins: e.g. recursion_limit=50
+        - NeMo execution rails: intercept tool calls, eg delete db
+4. output
+    - where: checks llm answer before it reaches user
+    - goal: stops hallucinations, PII leakage, toxic responses
+    - example
+        - Guardrails AI libs: enforces llm output type/schema
+        - microsoft presidio: standard for PII
+#### when your llm app has a problem, do you better your llm (probabilistic) or do you bring in external, deterministic tools?
+- if the inference answer is unacceptable => use guardrail to deterministically kill the possibility
+- if the inference answer is bad => improve your llm via prompt engineering, fine tuning, add/improve rag, switch models, etc.
+- modern AI engineering architecture: deterministic sandwich
+    - use LLM (probabilisitc model) only when needed: the task rules are too complex to be written deterministically (eg language)
+    - and wrap the probabilistic part (embedding/inference models) within deterministic layers (parsing/chunking, guardrails, etc.)
+
 ### regular rag vs graphrag
 #### tools
 1. regular rag
