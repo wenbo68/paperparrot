@@ -21,20 +21,29 @@
 # Reminders
 
 ### guardrails
-- guardrails are mostly deterministic to ensure rules/laws are followed
+- mostly neuro-symbolic: uses a combination of deterministic (symbolic) & probabilistic (neuro networks) approaches
+- deterministic: uses egex, keyword lists
+    - too brittle: cannot detect "tone," "implied jailbreaks," or "hallucinations."
+- probabilistic: uses small language models (slm) specialized in the required niche
 #### categories
 1. input
     - where: checks user input before it reaches llm
     - goal: stops jailbreak, prompt injections, toxic inputs, etc.
     - example
-        - LlamaGuard 4: multimodal; 13 harzrd categories (for user input)
-        - Lakera Guard: good against prompt injection
+        - LlamaGuard 4: multimodal; 14 harzrd categories (for user input)
+        - Lakera Guard: market leader against prompt injection
+        - NVIDIA NeMo Guardrails: checks user input against arbitrary topics
 2. RAG
-    - where: checks retrieved nodes before it reaches inference OR checks inference answers against the retrieved nodes
-    - goal: stops irrelevant documents from reaching inference, context injection (hacker puts prompts in uploaded files), etc.
-    - example
-        - NVIDIA NeMo Guardrails: good for checking relevance of retrieved nodes (uses similarity scores)
-        - DeepEval: stops hallucination by ensuring inference answer is supported by retrieved nodes
+    - where:
+        - checks retrieved nodes before it reaches inference for relevancy and context injection (hidden commands in node)
+            - example
+                - pass the documents through lakera guard before indexing them in the first place
+                - just let a separate llm/slm summarize the document then pass the summary to your inference
+        - checks inference answers against the retrieved nodes (reduces hallucination)
+            - example
+                - just let your llm or a slm check the inference answer b/f showing the user
+                - force inference answers to cite the chunk; then deterministically kill answers wihout or with nonexistent citations
+    - goal: stops irrelevant documents from reaching inference, context injection (hacker puts prompts in uploaded files), hallucination, etc.
 3. agentic
     - where: during llm/agent workflow
     - goal: stops infinite loops, too much api credit usage, unauthorized execution, etc.
@@ -45,8 +54,8 @@
     - where: checks llm answer before it reaches user
     - goal: stops hallucinations, PII leakage, toxic responses
     - example
-        - Guardrails AI libs: enforces llm output type/schema
-        - microsoft presidio: standard for PII
+        - microsoft presidio: standard for deterministic PII
+            - not good enough for contextual PII (need to pair presidio with llamaguard 4)
 #### when your llm app has a problem, do you better your llm (probabilistic) or do you bring in external, deterministic tools?
 - if the inference answer is unacceptable => use guardrail to deterministically kill the possibility
 - if the inference answer is bad => improve your llm via prompt engineering, fine tuning, add/improve rag, switch models, etc.
@@ -83,16 +92,20 @@
     - deployment: faas (eg vercel)
 2. backend code
     - stack: uses python; langchain typescript is usable but llamaindex typescript is not good
-    - deployment: paas (eg railway/render); can't deploy ai backend on serverless (eg vercel) b/c ai takes too long to run (will get shut down by vercel)
+    - deployment:
+       - paas (eg railway/render)
+       - serverless if the time-out is long enough
+          - aws lambda: 15min time out; good enough
+          - vercel: 60s time out; mostly not enough (a long langgraph workflow might get shut down)
 #### stateful (db)
-1. app/user data: paas (eg neon)
-2. vectors: paas (eg neon pgvector, pinecone), caas/iaas/onpremise (eg chromadb)
-3. checkpoints: paas (eg neon)
+1. app/user data: serverless (eg aws aurora serverless, neon), paas (eg aws aurora)
+2. vectors: serverless (eg aurora serverless, neon pgvector, pinecone), paas (eg pinecone legacy, aurora), caas/iaas/onpremise (eg chromadb)
+3. checkpoints: serverless (aurora serverless, neon), paas (eg aurora)
 #### self-hosted models (when you don't wanna use cloud apis)
 1. inference
     - ml paas (eg aws sagemaker): regular paas (eg railway) don't have enough GPUs
         - sagemaker real-time: the instance is always on (you pay per hour)
-        - sagemaker serverless: the instance scales to 0 but has cold starts (only works if your inference model is small, eg 8b)
+        - sagemaker serverless: mostly unusable as cold starts (loading llm weights to vram) can take 30-60s (bad UX)
         - steps:
             1. upload adapters to aws s3 (open model weights are usually not stored locally but just pulled from hugging face)
             2. choose an aws inference docker container or make your own via dockerfile/docker-compose
