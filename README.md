@@ -37,8 +37,9 @@
     - where:
         - checks retrieved nodes before it reaches inference for relevancy and context injection (hidden commands in node)
             - example
-                - pass the documents through lakera guard before indexing them in the first place
-                - just let a separate llm/slm summarize the document then pass the summary to your inference
+                - relevancy: re-ranking (llamaindex can use a model to score the retrieved chunk based on user query)
+                - context injection: pass the documents through lakera guard before indexing them in the first place
+                - context injection: just let a separate llm/slm summarize the document then pass the summary to your inference
         - checks inference answers against the retrieved nodes (reduces hallucination)
             - example
                 - just let your llm or a slm check the inference answer b/f showing the user
