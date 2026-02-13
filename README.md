@@ -239,11 +239,26 @@
     - user requests them from closest cdn node via urls
 
 ### scaling: when and how
+- 3 things to scale: disk (storage), ram (compute), cpu (compute)
+- 2 ways to scale: vertical, horizontal
+    - granularity (can you scale only the part you need?)
+        - vertical
+            - on prem: disk + ram + cpu
+            - iaas: disk + ram/cpu
+            - paas: disk/ram/cpu
+            - caas: horizontal under the hood...
+            - serverless: disk + ram/cpu
+        - horizontal: no granularity; you scale disk/ram/cpu together
 
 #### app server scaling
 - you scale when your app server doesn't have enough RAM/CPU
+    - need more **ram/cpu** if...
+        - many simple tasks: can be parallelised
+            - method: horizontal
+        - 1 complex task: cannot be parallelised (eg AI, image)
+            - method: vertical
 - make sure you delete old logs & docker images so you don't have to worry abt disk space
-- horizontal scaling is the standard for app servers
+    - logs shouldn't be on the server anyway: they should be streamed instantly to a centralized logger (eg datadog, ELK)
 - need to manage each app server's db connection pool when you scale your app server
     - app server scaled vertically: increase max connections (eg 20 -> 200) of that 1 pool
     - app server scaled horizontally: each app server has 1 pool (eg each app server has 20 db connections)
@@ -265,12 +280,43 @@
     - horizontal: do nothing... serverless automatically means infinite horizontal scaling
 
 #### db server scaling
-- you scale for RAM/CPU and for disk space and disk speed (larger disks are faster in cloud)
-- writes are often scaled vertically
-    - too many people writing to db -> switch to db server with more ram
-    - horizontal write scaling (sharding) is extremely complicated
-- reads are often scaled horizontally via the master-slave architecture (aka read replicas, primary-replica, lead-follower, etc.)
-    - too many people reading the db -> add more db servers that can only be read and will constantly copy data from the master (master can be written and also read when needed)
+- you scale db servers when it doesn't have enough disk or enough RAM/CPU
+    - need more **disk** if...
+        - you have too much data OR too many writes (db must write to disk, and more concurrent disk writes are allowed on larger disk)
+        - methods
+            - vertical: standard
+            - horizontal: sharding (each disk stores different data) -> extremely complicated
+    - need more **RAM** if...
+        - reads/writes are slow
+            - for reads
+                - steps
+                    1. db reads from ram first (fast)
+                    2. if data not in ram, db needs to read from disk (slow) and add to ram
+                - if ram is full, some reads will be slow
+            - for writes
+                - steps
+                    1. db saves your write cmd to disk first (fast)
+                    2. db finds from ram first and change ram data (fast)
+                    3. if data not in ram, db finds from disk and load to ram and change ram (slow)
+                    4. db sync disk with ram (slow)
+                - if ram is full, db must clean ram by syncing disk with ram first and then work on your new writes
+        - methods:
+            - vertical: if ram shortage due to...
+                - writes (there can only be 1 master; otherwise you have to shard)
+                - complex/large reads
+                    - db servers needs to load all that's read to ram
+                    - cannot be parallelised
+            - horizontal: if ram shortage due to many simple reads (there can be many slaves)
+    - need more **CPU** if...
+        - your reads are too mathematically complex (complex join/sorts) for current cpu
+        - methods:
+            - vertical: if cpu shortage due to...
+                - writes (again there can only be 1 master)
+                - complex/large reads
+            - horizontal: if cpu shortage due to many simple reads
+- partitioning: divide 1 table to more specific tables so that db server reads from smaller tables
+    - partitioning is not scaling
+    - used against complex/large reads to save ram/cpu
 
 1. on premise
     - vertical (writes): get better server -> pg_dump in old server -> restore data to new server
